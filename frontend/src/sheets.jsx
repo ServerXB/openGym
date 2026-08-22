@@ -19,6 +19,7 @@ import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
+import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 
 const S = () => useStore.getState().S
@@ -460,11 +461,16 @@ export const exercisePicker = onPick => ui().openSheet(close => <ExercisePicker 
 // "how does this lift go up" belongs next to sets and reps, not in a separate screen. Left
 // on "follow the routine" it inherits, so most people never touch it.
 function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
+  const st = useStore(s => s.S)
   const options = POLICIES_FOR[mode] || ['off']
   if (options.length < 2) return null
   const inherited = policyFor({ id: ex.id }, routine, mode)
   const active = policyFor({ ...c, id: ex.id }, routine, mode)
   const inc = c.inc > 0 ? c.inc : (mode === 'time' ? 5 : defaultIncrement(ex.id, unit))
+  const confirmedDefaults = confirmedRepRangeConfig(c, st.restSec)
+  const nextConfirmed = active === 'confirmed_rep_range'
+    ? nextPrescription(st, { ...c, ...confirmedDefaults, id: ex.id }, routine)
+    : null
   return <>
     <h4 className="sec">{t('Progression')}</h4>
     <div className="sect-b" style={{ marginBottom: 8 }}>
@@ -473,11 +479,21 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
           ...options.map(p => ({ value: p, label: t(POLICY_NAME[p]) }))]} />
     </div>
     <div className="small dim" style={{ marginBottom: active === 'off' ? 18 : 10 }}>{t(POLICY_DESC[active])}</div>
-    {active !== 'off' && <div className="row cfgrow" style={{ marginBottom: 18 }}>
+    {active !== 'off' && <div className="row cfgrow" style={{ marginBottom: 18, flexWrap: 'wrap' }}>
       <Stepper label={mode === 'time' ? t('Step (seconds)') : t('Step ({0})', unit)} value={inc}
         step={mode === 'time' ? 5 : 1.25} decimal={mode !== 'time'} onChange={v => setC(x => ({ ...x, inc: v }))} />
       {active === 'double' && <Stepper label={t('Reps from')} value={c.repsMin || Math.max(1, (c.reps || 10) - 2)}
         step={1} decimal={false} onChange={v => setC(x => ({ ...x, repsMin: v }))} />}
+      {active === 'confirmed_rep_range' && <>
+        <Stepper label={t('Minimum reps')} value={confirmedDefaults.minReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, minReps: v }))} />
+        <Stepper label={t('Maximum reps')} value={confirmedDefaults.maxReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, maxReps: v }))} />
+        <Stepper label={t('Starting target reps')} value={confirmedDefaults.targetReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, targetReps: v }))} />
+        <Stepper label={t('Starting rest time (seconds)')} value={confirmedDefaults.restSeconds} step={30} decimal={false} onChange={v => setC(x => ({ ...x, restSeconds: v }))} />
+        <Stepper label={t('Maximum rest time (seconds)')} value={confirmedDefaults.maxRestSeconds} step={30} decimal={false} onChange={v => setC(x => ({ ...x, maxRestSeconds: v }))} />
+      </>}
+    </div>}
+    {nextConfirmed && <div className="small dim" style={{ marginTop: -10, marginBottom: 18 }}>
+      {t('Next workout: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)}
     </div>}
   </>
 }
@@ -502,6 +518,9 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     const prog = {}
     if (c.prog) prog.prog = c.prog
     if (c.inc > 0) prog.inc = c.inc
+    if (policyFor({ ...c, id: ex.id }, routine, 'reps') === 'confirmed_rep_range') {
+      Object.assign(prog, confirmedRepRangeConfig(c, st.restSec))
+    }
     // Written only when it differs from what the dataset already says, so a barbell config
     // stays exactly the shape it was before these flags existed.
     // `bodyweight` is true of a hold as much as of a set of reps; `side` is not — it counts
@@ -831,7 +850,8 @@ export function beginWorkout(routineId, bw) {
   // kept on the entry purely so the workout can explain the number it chose.
   const entries = (r ? r.ex : []).map(cfg => {
     const plan = nextPrescription(st, cfg, r)
-    return { id: cfg.id, sg: cfg.sg, target: { ...cfg }, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
+    const target = { ...cfg, ...(plan.policy === 'confirmed_rep_range' ? { prog: plan.policy } : {}), ...(plan.reps != null ? { reps: plan.reps, targetReps: plan.reps } : {}), ...(plan.restSeconds != null ? { restSeconds: plan.restSeconds } : {}), ...(plan.topRangeStreak != null ? { topRangeStreak: plan.topRangeStreak } : {}) }
+    return { id: cfg.id, sg: cfg.sg, target, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
   })
   update(s => {
     s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }

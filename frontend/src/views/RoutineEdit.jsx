@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore.js'
 import { exOr } from '../lib/exercises.js'
 import { uid } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
-import { supersetUnits, cleanupSg, exLine } from '../lib/history.js'
+import { supersetUnits, cleanupSg, exLine, modeOf } from '../lib/history.js'
 import { Thumb } from '../components/Media.jsx'
 import { glyphPicker, exercisePicker, exConfigSheet, confirmSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
@@ -13,6 +13,7 @@ import { Button, SelectRow } from '../components/ui.jsx'
 import { POLICIES_FOR, POLICY_NAME, POLICY_DESC } from '../lib/progression.js'
 import BodyMap from '../components/BodyMap.jsx'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
+import { confirmedRepRangeConfig } from '../lib/confirmedRepRangeConfig.js'
 
 export default function RoutineEdit() {
   const nav = useNavigate()
@@ -49,7 +50,13 @@ export default function RoutineEdit() {
 
     <div className="sect-b" style={{ marginBottom: 16 }}>
       <SelectRow icon="chartLine" title={t('Progression')} sheetTitle={t('Progression')}
-        value={r.prog || 'linear'} onChange={v => update(s => { s.routines.find(x => x.id === id).prog = v })}
+        value={r.prog || 'linear'} onChange={v => update(s => {
+          const routine = s.routines.find(x => x.id === id)
+          routine.prog = v
+          if (v === 'confirmed_rep_range') routine.ex.forEach(ex => {
+            if (!ex.prog && modeOf(ex) === 'reps') Object.assign(ex, confirmedRepRangeConfig(ex, s.restSec))
+          })
+        })}
         options={POLICIES_FOR.reps.map(p => ({ value: p, label: t(POLICY_NAME[p]), subtitle: t(POLICY_DESC[p]) }))} />
     </div>
     <div className="small dim" style={{ margin: '-10px 2px 16px' }}>

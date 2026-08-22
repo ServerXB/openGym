@@ -18,12 +18,13 @@
 
 import { modeOf, repStep } from './history.js'
 import { EXIDX } from './exercises.js'
+import { confirmedRepRangeConfig } from './confirmedRepRangeConfig.js'
 
-export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'time']
+export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'confirmed_rep_range', 'time']
 
 // Which policies can sensibly drive which logging mode.
 export const POLICIES_FOR = {
-  reps: ['off', 'linear', 'greyskull', 'double'],
+  reps: ['off', 'linear', 'greyskull', 'double', 'confirmed_rep_range'],
   time: ['off', 'time'],
   cardio: ['off']
 }
@@ -33,6 +34,7 @@ export const POLICY_NAME = {
   linear: 'Linear progression',
   greyskull: 'Greyskull LP',
   double: 'Double progression',
+  confirmed_rep_range: 'Confirmed Rep-Range',
   time: 'Add time'
 }
 export const POLICY_DESC = {
@@ -40,6 +42,7 @@ export const POLICY_DESC = {
   linear: 'Hit every rep in every set and the weight goes up. Repeated misses trigger a deload.',
   greyskull: 'Two straight sets plus a final set taken to failure. Beat the target on that set and the weight goes up — double if you double the reps. One failure resets 10 %.',
   double: 'Work up through a rep range at the same weight. Reach the top of the range in every set and the weight goes up, reps back to the bottom.',
+  confirmed_rep_range: 'Add one rep after a clean session. At the top, confirm twice before adding weight; later-set misses add recovery time.',
   time: 'Hold every set for the full duration and the target goes up.'
 }
 
@@ -60,6 +63,7 @@ export function defaultIncrement(exId, unit) {
   return heavy ? 5 : 2.5
 }
 export const DEFAULT_SEC_INCREMENT = 5
+export const CONFIRMED_REST_INCREMENT = 30
 // Where adding another set of push-ups stops being progress and starts being a way to spend
 // an evening. Past this the honest advice is load or a harder variation (issue #33).
 export const MAX_BW_SETS = 6
@@ -147,6 +151,75 @@ export function stallCount(sessions) {
   return n
 }
 
+// Confirmed Rep-Range deliberately judges only the prescribed sets. Extra sets are optional
+// work: they neither rescue a missed prescription nor turn an otherwise clean session into a
+// miss. This also makes the rule stable when a user adds an AMRAP/back-off set.
+export function confirmedRepRangeSession(entry, fallback) {
+  const target = (entry && entry.target) || fallback || {}
+  const planned = Math.max(1, target.sets || fallback?.sets || 1)
+  const goal = Math.max(1, target.targetReps || target.reps || fallback?.targetReps || fallback?.reps || 1)
+  const prescribed = ((entry && entry.sets) || []).slice(0, planned)
+  const hit = s => !!s?.done && (s.r || 0) >= goal
+  return {
+    goal, planned,
+    weight: Math.max(0, ...prescribed.filter(s => s?.done).map(s => s.w || 0)),
+    firstOk: hit(prescribed[0]),
+    ok: prescribed.length === planned && prescribed.every(hit),
+    restSeconds: Math.max(0, target.restSeconds ?? fallback?.restSeconds ?? 0),
+    maxRestSeconds: Math.max(0, target.maxRestSeconds ?? fallback?.maxRestSeconds ?? 0)
+  }
+}
+
+function confirmedSessionsFor(S, exId, fallback) {
+  const out = []
+  ;(S.workouts || []).forEach(w => {
+    const entry = (w.entries || []).find(e => e.id === exId)
+    // Do not turn workouts logged under Linear/Double into confirmation history when a user
+    // switches strategy. New entries snapshot the effective policy, including routine-level
+    // inheritance, so only this strategy's own sessions participate.
+    if (entry?.target?.prog === 'confirmed_rep_range' && entry.sets?.some(s => s.done)) out.push(confirmedRepRangeSession(entry, fallback))
+  })
+  return out
+}
+
+/** Pure domain rule for Confirmed Rep-Range. */
+export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
+  const normalized = confirmedRepRangeConfig(cfg, S.restSec)
+  const { minReps, maxReps, targetReps: configuredTarget } = normalized
+  const inc = cfg.weightIncrement > 0 ? cfg.weightIncrement : (cfg.inc > 0 ? cfg.inc : defaultIncrement(cfg.id, unit))
+  const initialRest = normalized.restSeconds
+  const maxRest = normalized.maxRestSeconds
+  const sessions = confirmedSessionsFor(S, cfg.id, cfg)
+  const last = sessions[sessions.length - 1]
+  if (!last) return { policy: 'confirmed_rep_range', kind: 'first', reps: configuredTarget, restSeconds: initialRest, topRangeStreak: 0, why: ['Nothing logged yet — this session sets the baseline.'] }
+
+  const target = Math.min(maxReps, Math.max(minReps, last.goal || configuredTarget))
+  const rest = last.restSeconds || initialRest
+  let streak = 0
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    if (sessions[i].goal !== maxReps || !sessions[i].ok) break
+    streak++
+  }
+  if (!last.ok) {
+    const nextRest = last.firstOk ? Math.min(maxRest, rest + CONFIRMED_REST_INCREMENT) : rest
+    return {
+      policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: target,
+      restSeconds: nextRest, topRangeStreak: 0,
+      why: last.firstOk
+        ? [nextRest > rest ? 'Later sets missed the target — recovery increased from {0}s to {1}s.' : 'Later sets missed the target — recovery remains at its maximum of {0}s.', rest, nextRest]
+        : ['The first set missed the target — weight, target and recovery stay unchanged.']
+    }
+  }
+  if (target < maxReps) {
+    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, reps: target + 1, restSeconds: rest, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, target + 1] }
+  }
+  if (streak < 2) {
+    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: maxReps, restSeconds: rest, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
+  }
+  const nextWeight = snap(last.weight + inc, inc)
+  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, reps: minReps, restSeconds: rest, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
+}
+
 /**
  * The next prescription for one exercise.
  *
@@ -161,6 +234,7 @@ export function nextPrescription(S, cfg, routine) {
   const unit = S.unit || 'kg'
   const inc = cfg.inc > 0 ? cfg.inc : (mode === 'time' ? DEFAULT_SEC_INCREMENT : defaultIncrement(cfg.id, unit))
   if (policy === 'off') return { policy, kind: 'off' }
+  if (policy === 'confirmed_rep_range') return confirmedRepRangeProgression(S, cfg, unit)
 
   const sessions = sessionsFor(S, cfg.id, cfg).filter(s => s.mode === mode)
   const last = sessions[sessions.length - 1]
@@ -248,7 +322,13 @@ export function nextPrescription(S, cfg, routine) {
  * are touched, and only on sets that have not been logged yet.
  */
 export function applyPrescription(sets, p) {
-  if (!p || p.kind === 'off' || p.kind === 'first') return sets
+  if (!p || p.kind === 'off') return sets
+  // Most policies have no opinion on a first session, but some do. Confirmed Rep-Range, for
+  // example, returns its configured starting target even when the only exercise history was
+  // logged under another policy. Apply any explicit fields instead of leaking the old policy's
+  // rows into the new workout; a fieldless `first` prescription remains a true no-op.
+  const hasTargets = p.weight != null || p.reps != null || p.sec != null || p.sets != null
+  if (!hasTargets) return sets
   const out = sets.map(s => {
     if (s.done) return s
     const o = { ...s }

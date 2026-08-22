@@ -14,6 +14,7 @@ import Icon from '../components/Icon.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { nextPrescription, applyPrescription } from '../lib/progression.js'
 import { glyphOf } from '../lib/glyphs.js'
+import { restSecondsFor } from '../lib/workout-timer.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -206,7 +207,7 @@ function ActiveWorkout() {
         beep(S.sound, 1040, 0.12); vibrate(30)
         const isLastExInUnit = idx === unit[unit.length - 1]
         const unitDone = unit.every(ui => (ui === idx ? e : A.entries[ui]).sets.every(x => x.done))
-        if (isLastExInUnit && !unitDone) startRest(S.restSec)
+        if (isLastExInUnit && !unitDone) startRest(restSecondsFor(e, S.restSec))
         else if (unitDone) stopRest()
         if (unitDone && isLastUnit) workoutDone = true      // last exercise's last set → done
         // Only loaded reps training has a "working weight" worth confirming — a bodyweight
@@ -284,7 +285,8 @@ function ActiveWorkout() {
     <Button onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => update(s => {
       const full = { ...cfg, id: ex.id }
       const plan = nextPrescription(s, full, s.routines.find(r => r.id === s.active.routineId))
-      s.active.entries.push({ id: ex.id, target: { ...cfg }, plan, sets: applyPrescription(buildSets(s, full), plan) })
+      const target = { ...cfg, ...(plan.policy === 'confirmed_rep_range' ? { prog: plan.policy } : {}), ...(plan.reps != null ? { reps: plan.reps, targetReps: plan.reps } : {}), ...(plan.restSeconds != null ? { restSeconds: plan.restSeconds } : {}), ...(plan.topRangeStreak != null ? { topRangeStreak: plan.topRangeStreak } : {}) }
+      s.active.entries.push({ id: ex.id, target, plan, sets: applyPrescription(buildSets(s, full), plan) })
       s.active.cur = s.active.entries.length - 1
     }), null, S.routines.find(r => r.id === A.routineId)))} icon="plus">{t('Add exercise')}</Button>
     <div style={{ height: 10 }} />

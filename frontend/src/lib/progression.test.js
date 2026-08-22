@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   readSession, sessionsFor, stallCount, nextPrescription, applyPrescription,
-  policyFor, defaultIncrement, POLICIES_FOR, DELOAD_AFTER, MAX_BW_SETS
+  policyFor, defaultIncrement, POLICIES_FOR, DELOAD_AFTER, MAX_BW_SETS,
+  confirmedRepRangeProgression, confirmedRepRangeSession
 } from './progression.js'
+import { buildSets } from './history.js'
 import { EXDB } from './exercises.js'
 
 const LIFT = EXDB.find(e => e.bp !== 'cardio' && !['upper legs', 'lower legs', 'back', 'hips', 'glutes'].includes(e.bp)).id
@@ -313,6 +315,107 @@ describe('double progression', () => {
   })
 })
 
+describe('Confirmed Rep-Range progression', () => {
+  const cfg = { id: LIFT, sets: 3, reps: 8, minReps: 8, maxReps: 12, targetReps: 8, weight: 70, inc: 2.5, restSeconds: 120, maxRestSeconds: 240, prog: 'confirmed_rep_range' }
+  const state = rows => ({
+    unit: 'kg', restSec: 90,
+    workouts: rows.map((x, i) => ({
+      d: `2026-02-${String(i + 1).padStart(2, '0')}`,
+      entries: [{
+        id: LIFT,
+        target: { ...cfg, reps: x.target, targetReps: x.target, restSeconds: x.rest ?? 120, topRangeStreak: x.streak ?? 0 },
+        sets: x.reps.map(r => r == null ? { w: x.weight ?? 70, r: 0, done: false } : { w: x.weight ?? 70, r, done: true })
+      }]
+    }))
+  })
+
+  it.each([[8, 9], [9, 10], [10, 11], [11, 12]])('advances a successful target from %i to %i', (from, to) => {
+    expect(confirmedRepRangeProgression(state([{ target: from, reps: [from, from, from] }]), cfg).reps).toBe(to)
+  })
+
+  it('holds weight and records the first top-range confirmation', () => {
+    const p = confirmedRepRangeProgression(state([{ target: 12, reps: [12, 12, 12] }]), cfg)
+    expect(p).toMatchObject({ weight: 70, reps: 12, topRangeStreak: 1 })
+  })
+
+  it('increases weight and resets target and streak after the second consecutive confirmation', () => {
+    const p = confirmedRepRangeProgression(state([
+      { target: 12, reps: [12, 12, 12], streak: 0 },
+      { target: 12, reps: [12, 12, 12], streak: 1 }
+    ]), cfg)
+    expect(p).toMatchObject({ weight: 72.5, reps: 8, topRangeStreak: 0 })
+  })
+
+  it('resets a top-range streak when the next session misses', () => {
+    const p = confirmedRepRangeProgression(state([
+      { target: 12, reps: [12, 12, 12] },
+      { target: 12, reps: [12, 11, 10], streak: 1 }
+    ]), cfg)
+    expect(p).toMatchObject({ weight: 70, reps: 12, topRangeStreak: 0 })
+  })
+
+  it('does not increase rest when the first set misses', () => {
+    expect(confirmedRepRangeProgression(state([{ target: 10, reps: [9, null, null] }]), cfg)).toMatchObject({ reps: 10, restSeconds: 120 })
+  })
+
+  it('adds 30 seconds when the first set succeeds but a later set misses', () => {
+    expect(confirmedRepRangeProgression(state([{ target: 10, reps: [10, 9, 8] }]), cfg)).toMatchObject({ reps: 10, weight: 70, restSeconds: 150 })
+  })
+
+  it('caps rest exactly at the configured maximum and holds it there', () => {
+    expect(confirmedRepRangeProgression(state([{ target: 10, reps: [10, 9, 8], rest: 230 }]), cfg).restSeconds).toBe(240)
+    expect(confirmedRepRangeProgression(state([{ target: 10, reps: [10, 9, 8], rest: 240 }]), cfg).restSeconds).toBe(240)
+  })
+
+  it('accepts reps above target and requires every prescribed set to be complete', () => {
+    expect(confirmedRepRangeSession(state([{ target: 10, reps: [12, 11, 10] }]).workouts[0].entries[0], cfg).ok).toBe(true)
+    expect(confirmedRepRangeSession(state([{ target: 10, reps: [10, 10, null] }]).workouts[0].entries[0], cfg).ok).toBe(false)
+  })
+
+  it('ignores extra sets but never lets them rescue a missed prescribed set', () => {
+    expect(confirmedRepRangeSession(state([{ target: 10, reps: [10, 10, 10, 1] }]).workouts[0].entries[0], cfg).ok).toBe(true)
+    expect(confirmedRepRangeSession(state([{ target: 10, reps: [10, 9, 10, 20] }]).workouts[0].entries[0], cfg).ok).toBe(false)
+  })
+
+  it('loads legacy exercise configs without any of the new fields', () => {
+    const legacy = { id: LIFT, sets: 3, reps: 8, weight: 70, prog: 'confirmed_rep_range' }
+    expect(() => nextPrescription({ unit: 'kg', restSec: 90, workouts: [] }, legacy)).not.toThrow()
+    expect(nextPrescription({ unit: 'kg', restSec: 90, workouts: [] }, legacy)).toMatchObject({ reps: 8, restSeconds: 90, topRangeStreak: 0 })
+  })
+
+  it('uses canonical 8–12 defaults instead of turning ordinary reps into a 10–10 range', () => {
+    const legacy = { id: LIFT, sets: 3, reps: 10, weight: 70, prog: 'confirmed_rep_range' }
+    const first = nextPrescription({ unit: 'kg', restSec: 90, workouts: [] }, legacy)
+    expect(first).toMatchObject({ reps: 8, restSeconds: 90, topRangeStreak: 0 })
+  })
+
+  it('does not reuse sessions logged under another progression policy', () => {
+    const S = state([{ target: 12, reps: [12, 12, 12] }])
+    S.workouts[0].entries[0].target.prog = 'double'
+    expect(nextPrescription(S, cfg)).toMatchObject({ kind: 'first', reps: 8, topRangeStreak: 0 })
+  })
+
+  it.each(['linear', 'double', 'greyskull'])('replaces rows carried from %s when constructing the first confirmed rep-range workout', previousPolicy => {
+    const S = {
+      unit: 'kg', restSec: 90, exWeights: {},
+      workouts: [{
+        d: '2026-08-01',
+        entries: [{
+          id: LIFT,
+          target: { id: LIFT, sets: 3, reps: 5, weight: 60, prog: previousPolicy },
+          sets: Array.from({ length: 3 }, () => ({ w: 60, r: 5, done: true }))
+        }]
+      }]
+    }
+
+    const prescription = nextPrescription(S, cfg)
+    const sets = applyPrescription(buildSets(S, cfg), prescription)
+
+    expect(prescription).toMatchObject({ policy: 'confirmed_rep_range', kind: 'first', reps: 8 })
+    expect(sets).toEqual(Array.from({ length: 3 }, () => ({ w: 60, r: 8, done: false })))
+  })
+})
+
 describe('timed progression', () => {
   const cfg = { id: LIFT, mode: 'time', sets: 2, sec: 45, prog: 'time' }
   const T = { sets: 2, sec: 45, mode: 'time' }
@@ -428,10 +531,17 @@ describe('applyPrescription', () => {
     expect(applyPrescription(sets, { kind: 'up', weight: 42.5, reps: 8 })[1]).toEqual({ w: 42.5, r: 8, done: false })
   })
 
-  it('touches nothing for "off" or a first session', () => {
+  it('touches nothing for "off" or a first session without explicit targets', () => {
     expect(applyPrescription(sets, { kind: 'off' })).toBe(sets)
     expect(applyPrescription(sets, { kind: 'first' })).toBe(sets)
     expect(applyPrescription(sets, null)).toBe(sets)
+  })
+
+  it('applies explicit targets from a first prescription', () => {
+    expect(applyPrescription(sets, { kind: 'first', reps: 8 })).toEqual([
+      { w: 60, r: 5, done: true },
+      { w: 60, r: 8, done: false }
+    ])
   })
 
   it('adjusts a timed set without inventing a weight', () => {

@@ -63,7 +63,7 @@ as a home-screen app, passkey sign-in, offline support, sync across your phone a
 - ☀️ **The screen stays awake while you train** — no unlocking the phone and finding your place again between every set. On for as long as a workout is running, released the moment you finish it, and switchable off in Settings
 - 🔗 **Supersets** — build them, and log them back-to-back with a rest only after the pair
 - ⏱️ **Timed exercises** — planks, hangs, wall sits and loaded carries are logged by time, not reps, with a work timer that counts the set itself (separate from the rest timer) and logs the time you actually held. They can carry weight too
-- 📈 **Progression that follows a rule** — pick one per routine, override it per exercise: linear, **Greyskull LP** (AMRAP top set, double jumps, 10 % resets), double progression through a rep range, or adding time. Your weights are already right when the session opens, and every target says *why* it's that number. Missed reps never advance the load, stalls trigger a deload, and bodyweight exercises progress in reps instead
+- 📈 **Progression that follows a rule** — pick one per routine, override it per exercise: linear, **Greyskull LP** (AMRAP top set, double jumps, 10 % resets), double progression, **Confirmed Rep-Range**, or adding time. Your weights are already right when the session opens, and every target says *why* it's that number. Missed reps never advance the load, and bodyweight exercises progress in reps instead
 - 💪 **Estimated 1RM** — per exercise, from your best eligible set (it names which one), with its own progress curve and a calculator for sets you haven't done. Won't guess above 12 reps
 - 🎯 **Effort per set, in your scale** — an optional third column rating how hard a set was, as **RIR** (reps left in the tank) or **RPE** (the same judgement on a 10-point scale). Off by default; each set keeps the scale it was logged with, and nothing else reads the value — your progression and 1RM are unaffected
 - 💪 **Bodyweight exercises, logged as bodyweight** — push-ups, pull-ups, dips and 300-odd others arrive knowing they carry no load, so there's no weight column and no working-weight prompt: one stepper, log the reps. Add a dip belt and it reads as an addition, and progression goes back to following the weight. Without one, reps climb — and past a ceiling you set, a set is added instead of a rep, up to the point where the honest advice is load or a harder variation
@@ -178,6 +178,35 @@ The rest, in no particular order:
 - [ ] Body measurements (waist, arms…) alongside weight
 - [ ] Per-exercise notes & plate calculator
 - [ ] Exercise instructions in German & Portuguese (UI is translated; upstream dataset doesn't ship these yet)
+
+## Confirmed Rep-Range progression
+
+This per-exercise rule advances only from completed, prescribed sets; RIR/RPE stays recorded
+but never affects the decision. Configure minimum/maximum reps, current target, load increment,
+current recovery and maximum recovery. One clean session adds one rep until the top. At the top,
+two consecutive clean sessions are required before load increases and the target returns to the
+minimum. A first-set miss holds everything. If the first set succeeds but a later prescribed set
+misses, recovery increases by 30 seconds up to its cap. There is no automatic deload. Optional
+extra sets are ignored.
+
+```text
+Bench Press — 3 sets, 8–12 reps, 70 kg, +2.5 kg, rest 120–240 s
+8/8/8 → target 9
+9/9/9 → target 10
+10/10/10 → target 11
+11/11/11 → target 12
+12/12/12 → top-range confirmation 1/2
+12/12/12 → 72.5 kg, target 8, confirmation 0/2
+```
+
+```text
+Target 10, rest 120 s
+10/9/8 → target and weight unchanged, rest 150 s
+```
+
+The effective target, recovery and confirmation count are snapshotted into each workout entry.
+Old routine/workout JSON remains valid: absent fields use the exercise target, profile rest timer
+and normal per-exercise weight increment as defaults.
 
 ## Tech
 
