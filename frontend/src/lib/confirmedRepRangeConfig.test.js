@@ -9,6 +9,7 @@ describe('Confirmed Rep-Range configuration', () => {
       targetReps: 8,
       restSeconds: 120,
       maxRestSeconds: 240,
+      restReductionStrategy: 'manual',
       topRangeStreak: 0
     })
   })
@@ -20,6 +21,15 @@ describe('Confirmed Rep-Range configuration', () => {
       targetReps: 10,
       restSeconds: 300,
       maxRestSeconds: 300
+    })
+  })
+
+  it('keeps recovery reduction opt-in and normalizes unknown values to manual', () => {
+    expect(confirmedRepRangeConfig({ restReductionStrategy: 'auto_after_successes' })).toMatchObject({
+      restReductionStrategy: 'auto_after_successes'
+    })
+    expect(confirmedRepRangeConfig({ restReductionStrategy: 'future-mode' })).toMatchObject({
+      restReductionStrategy: 'manual'
     })
   })
 })

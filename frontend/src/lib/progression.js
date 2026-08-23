@@ -19,6 +19,12 @@
 import { modeOf, repStep } from './history.js'
 import { EXIDX } from './exercises.js'
 import { confirmedRepRangeConfig } from './confirmedRepRangeConfig.js'
+import { confirmedRepRangeRestControl } from './confirmedRepRangeRest.js'
+import {
+  CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
+  CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES,
+  confirmedRestAutoReduction
+} from './confirmedRepRangeAutoRest.js'
 
 export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'confirmed_rep_range', 'time']
 
@@ -166,7 +172,14 @@ export function confirmedRepRangeSession(entry, fallback) {
     firstOk: hit(prescribed[0]),
     ok: prescribed.length === planned && prescribed.every(hit),
     restSeconds: Math.max(0, target.restSeconds ?? fallback?.restSeconds ?? 0),
-    maxRestSeconds: Math.max(0, target.maxRestSeconds ?? fallback?.maxRestSeconds ?? 0)
+    maxRestSeconds: Math.max(0, target.maxRestSeconds ?? fallback?.maxRestSeconds ?? 0),
+    restEpochId: typeof target.restEpochId === 'string' ? target.restEpochId : null,
+    restReductionStrategy: target.restReductionStrategy,
+    // Never infer this from today's config: doing so would reinterpret old successes after
+    // the user edits the base. Missing means the session predates automatic reduction.
+    restBaseSeconds: Number.isFinite(Number(target.restBaseSeconds))
+      ? Math.max(0, Math.round(Number(target.restBaseSeconds)))
+      : null
   }
 }
 
@@ -182,6 +195,115 @@ function confirmedSessionsFor(S, exId, fallback) {
   return out
 }
 
+// Recovery has its own history boundary. A manual reset opens a new epoch without changing
+// the sessions used for weight, rep targets or the top-range confirmation streak.
+function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
+  const restEpochId = control?.epochId
+  const relevant = control
+    ? sessions.filter(session => session.restEpochId === restEpochId)
+    : sessions
+  const last = relevant[relevant.length - 1]
+
+  if (!last) {
+    const restSeconds = control
+      ? Math.min(maxRest, Math.max(0, Math.round(control.resetSeconds)))
+      : initialRest
+    return {
+      restSeconds,
+      ...(restEpochId ? { restEpochId } : {}),
+      restSource: control ? 'manual_reset' : 'initial',
+      restResetPending: !!control,
+      restWhy: control
+        ? ['Recovery manually reset to {0}s for the next workout.', restSeconds]
+        : ['Recovery starts at the configured base of {0}s.', restSeconds]
+    }
+  }
+
+  const rest = last.restSeconds ?? control?.resetSeconds ?? initialRest
+  if (!last.ok && last.firstOk) {
+    // Lowering the configured maximum must never turn a failed workout into an implicit
+    // recovery decrease. Keep an already-higher effective value until the user explicitly
+    // resets it (or the opt-in success rule earns a reduction).
+    const restSeconds = rest >= maxRest ? rest : Math.min(maxRest, rest + CONFIRMED_REST_INCREMENT)
+    return {
+      restSeconds,
+      ...(restEpochId ? { restEpochId } : {}),
+      restSource: restSeconds > rest ? 'adaptive_increase' : rest > maxRest ? 'above_max' : 'max_cap',
+      restResetPending: false,
+      restWhy: restSeconds > rest
+        ? ['Later sets missed the target — recovery increased from {0}s to {1}s.', rest, restSeconds]
+        : rest > maxRest
+          ? ['Later sets missed the target — recovery stays at {0}s despite the configured maximum of {1}s; a failure never decreases recovery.', rest, maxRest]
+          : ['Later sets missed the target — recovery remains at its maximum of {0}s.', restSeconds]
+    }
+  }
+
+  return {
+    restSeconds: rest,
+    ...(restEpochId ? { restEpochId } : {}),
+    restSource: 'carried',
+    restResetPending: false,
+    restWhy: last.firstOk
+      ? ['Recovery stays at {0}s.', rest]
+      : ['The first set missed the target — recovery stays at {0}s.', rest]
+  }
+}
+
+// Automatic recovery reduction follows consecutive successful exposures at one prescribed
+// recovery. Weight is deliberately not a boundary: narrow rep ranges can increase load before
+// four sessions at one weight, and the evidence used for the default threshold reduced rest by
+// exposure rather than by a fixed-load block.
+function confirmedRepRangeRestPlan(recovery, sessions, normalized, last) {
+  const strategy = normalized.restReductionStrategy
+  const decision = confirmedRestAutoReduction({
+    sessions,
+    restSeconds: recovery.restSeconds,
+    baseRestSeconds: normalized.restSeconds,
+    restEpochId: recovery.restEpochId,
+    strategy
+  })
+  const plan = {
+    ...recovery,
+    restSeconds: decision.restSeconds,
+    restBaseSeconds: normalized.restSeconds,
+    restReductionStrategy: strategy,
+    restSuccessStreak: decision.restSuccessStreak
+  }
+
+  if (decision.reduced) {
+    return {
+      ...plan,
+      restSource: 'automatic_decrease',
+      restWhy: [
+        '{0} consecutive successful sessions with the same prescribed recovery — recovery decreased from {1}s to {2}s.',
+        CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
+        recovery.restSeconds,
+        decision.restSeconds
+      ]
+    }
+  }
+
+  // A miss already has a more useful recovery explanation (unchanged, increased, or cap),
+  // and a pending manual reset must remain visibly attributable to the user action.
+  if (strategy !== CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES || !last?.ok || recovery.restResetPending) return plan
+
+  if (decision.restSeconds <= normalized.restSeconds) {
+    return {
+      ...plan,
+      restWhy: ['Recovery is already at its configured base of {0}s.', normalized.restSeconds]
+    }
+  }
+  return {
+    ...plan,
+    restWhy: [
+      'Recovery stays at {0}s — automatic reduction progress: {1} / {2} successful sessions.',
+      decision.restSeconds,
+      decision.restSuccessStreak,
+      CONFIRMED_REST_DECREASE_AFTER_SUCCESSES
+    ]
+  }
+}
+
 /** Pure domain rule for Confirmed Rep-Range. */
 export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const normalized = confirmedRepRangeConfig(cfg, S.restSec)
@@ -191,33 +313,39 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const maxRest = normalized.maxRestSeconds
   const sessions = confirmedSessionsFor(S, cfg.id, cfg)
   const last = sessions[sessions.length - 1]
-  if (!last) return { policy: 'confirmed_rep_range', kind: 'first', reps: configuredTarget, restSeconds: initialRest, topRangeStreak: 0, why: ['Nothing logged yet — this session sets the baseline.'] }
+  const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg.id), initialRest, maxRest)
+  if (!last) {
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, null)
+    return { policy: 'confirmed_rep_range', kind: 'first', reps: configuredTarget, ...restPlan, topRangeStreak: 0, why: ['Nothing logged yet — this session sets the baseline.'] }
+  }
 
   const target = Math.min(maxReps, Math.max(minReps, last.goal || configuredTarget))
-  const rest = last.restSeconds || initialRest
   let streak = 0
   for (let i = sessions.length - 1; i >= 0; i--) {
     if (sessions[i].goal !== maxReps || !sessions[i].ok) break
     streak++
   }
   if (!last.ok) {
-    const nextRest = last.firstOk ? Math.min(maxRest, rest + CONFIRMED_REST_INCREMENT) : rest
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     return {
       policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: target,
-      restSeconds: nextRest, topRangeStreak: 0,
+      ...restPlan, topRangeStreak: 0,
       why: last.firstOk
-        ? [nextRest > rest ? 'Later sets missed the target — recovery increased from {0}s to {1}s.' : 'Later sets missed the target — recovery remains at its maximum of {0}s.', rest, nextRest]
-        : ['The first set missed the target — weight, target and recovery stay unchanged.']
+        ? ['A later set missed the target — weight and target stay unchanged.']
+        : ['The first set missed the target — weight and target stay unchanged.']
     }
   }
   if (target < maxReps) {
-    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, reps: target + 1, restSeconds: rest, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, target + 1] }
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, reps: target + 1, ...restPlan, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, target + 1] }
   }
   if (streak < 2) {
-    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: maxReps, restSeconds: rest, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: maxReps, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
   }
   const nextWeight = snap(last.weight + inc, inc)
-  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, reps: minReps, restSeconds: rest, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
+  const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, reps: minReps, ...restPlan, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
 }
 
 /**

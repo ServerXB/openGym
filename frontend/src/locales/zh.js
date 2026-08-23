@@ -1,5 +1,8 @@
 // Simplified Chinese UI strings. Keys are the English source strings (see lib/i18n.js).
+import confirmedRepRangeFallback from '../lib/confirmedRepRangeLocaleFallback.js'
+
 export default {
+  ...confirmedRepRangeFallback,
   'Confirm': '确认',
   'Cancel': '取消',
   'Delete': '删除',

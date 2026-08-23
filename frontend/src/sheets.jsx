@@ -20,6 +20,14 @@ import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-sha
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
 import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
+import {
+  CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
+  CONFIRMED_REST_DECREMENT_SECONDS,
+  CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES,
+  CONFIRMED_REST_REDUCTION_MANUAL
+} from './lib/confirmedRepRangeAutoRest.js'
+import { resetConfirmedRepRangeRest } from './lib/confirmedRepRangeRest.js'
+import { targetForPrescription } from './lib/workout-prescription.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 
 const S = () => useStore.getState().S
@@ -460,7 +468,7 @@ export const exercisePicker = onPick => ui().openSheet(close => <ExercisePicker 
 // Progression settings for one exercise (issue #17). Shown inside the config sheet because
 // "how does this lift go up" belongs next to sets and reps, not in a separate screen. Left
 // on "follow the routine" it inherits, so most people never touch it.
-function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
+function ProgressionFields({ ex, mode, c, setC, existing, routine, unit }) {
   const st = useStore(s => s.S)
   const options = POLICIES_FOR[mode] || ['off']
   if (options.length < 2) return null
@@ -468,9 +476,32 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
   const active = policyFor({ ...c, id: ex.id }, routine, mode)
   const inc = c.inc > 0 ? c.inc : (mode === 'time' ? 5 : defaultIncrement(ex.id, unit))
   const confirmedDefaults = confirmedRepRangeConfig(c, st.restSec)
-  const nextConfirmed = active === 'confirmed_rep_range'
-    ? nextPrescription(st, { ...c, ...confirmedDefaults, id: ex.id }, routine)
+  // Recovery reset is an immediate action, while the fields in this sheet are only drafts
+  // until Save. Always reset to the persisted base, never to an unsaved number in a stepper.
+  const persistedConfig = existing || c
+  const persistedActive = policyFor({ ...persistedConfig, id: ex.id }, routine, mode)
+  const persistedDefaults = confirmedRepRangeConfig(persistedConfig, st.restSec)
+  const confirmedIsPreview = active === 'confirmed_rep_range' && (!existing || persistedActive !== 'confirmed_rep_range')
+  const nextConfirmed = active !== 'confirmed_rep_range'
+    ? null
+    : confirmedIsPreview
+      ? nextPrescription(st, { ...c, ...confirmedDefaults, id: ex.id }, routine)
+      : nextPrescription(st, { ...persistedConfig, ...persistedDefaults, id: ex.id }, routine)
+  const restReason = nextConfirmed?.restWhy
+    ? t(nextConfirmed.restWhy[0], ...nextConfirmed.restWhy.slice(1))
     : null
+  const canResetRest = !confirmedIsPreview && nextConfirmed && nextConfirmed.restSeconds !== persistedDefaults.restSeconds
+  const resetRest = () => confirmSheet({
+    title: t('Reset recovery to {0}s?', persistedDefaults.restSeconds),
+    message: t('Recovery history is shared by exercise, so this reset applies to the exercise in every routine, subject to each configuration\'s maximum. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.'),
+    confirmText: t('Reset to {0}s', persistedDefaults.restSeconds),
+    onConfirm: () => {
+      update(s => resetConfirmedRepRangeRest(s, ex.id, {
+        resetSeconds: persistedDefaults.restSeconds
+      }))
+      toast(t('Recovery reset to {0}s for the next workout.', persistedDefaults.restSeconds))
+    }
+  })
   return <>
     <h4 className="sec">{t('Progression')}</h4>
     <div className="sect-b" style={{ marginBottom: 8 }}>
@@ -492,8 +523,36 @@ function ProgressionFields({ ex, mode, c, setC, routine, unit }) {
         <Stepper label={t('Maximum rest time (seconds)')} value={confirmedDefaults.maxRestSeconds} step={30} decimal={false} onChange={v => setC(x => ({ ...x, maxRestSeconds: v }))} />
       </>}
     </div>}
+    {active === 'confirmed_rep_range' && <div className="sect-b" style={{ marginBottom: 12 }}>
+      <Row title={t('Automatic recovery reduction')}
+        subtitle={t('After {0} successful workouts prescribed with the same recovery, try {1} seconds less. A failure restarts the count; recovery never goes below the initial value.', CONFIRMED_REST_DECREASE_AFTER_SUCCESSES, CONFIRMED_REST_DECREMENT_SECONDS)}>
+        <Switch checked={confirmedDefaults.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES}
+          onChange={on => setC(x => ({
+            ...x,
+            restReductionStrategy: on
+              ? CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES
+              : CONFIRMED_REST_REDUCTION_MANUAL
+          }))} />
+      </Row>
+    </div>}
     {nextConfirmed && <div className="small dim" style={{ marginTop: -10, marginBottom: 18 }}>
-      {t('Next workout: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)}
+      <div>{confirmedIsPreview
+        ? t('Preview after saving: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)
+        : t('Next workout: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)}</div>
+      {!confirmedIsPreview && <>
+        <div>{t('Initial recovery: {0}s · Effective recovery: {1}s.', persistedDefaults.restSeconds, nextConfirmed.restSeconds)}</div>
+        {restReason && <div>{t('Why: {0}', restReason)}</div>}
+        {nextConfirmed.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES && nextConfirmed.restSeconds > persistedDefaults.restSeconds &&
+          <div>{t('Successful workouts prescribed with this recovery: {0} / {1}.', nextConfirmed.restSuccessStreak || 0, CONFIRMED_REST_DECREASE_AFTER_SUCCESSES)}</div>}
+        <div style={{ marginTop: 8 }}>
+          <Button size="sm" disabled={!canResetRest} onClick={resetRest}>
+            {canResetRest
+              ? t('Reset recovery to {0}s', persistedDefaults.restSeconds)
+              : t('Recovery is already at the initial value')}
+          </Button>
+        </div>
+        <div style={{ marginTop: 6 }}>{t('Changing the initial recovery takes effect after Save and does not reset the effective recovery.')}</div>
+      </>}
     </div>}
   </>
 }
@@ -609,7 +668,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
         ? t('Reps climb to {0}, then a set is added and the reps start over. At {1} sets it asks you to add weight instead.', c.repsMax, MAX_BW_SETS)
         : t('Reps climb by one whenever every set was clean. Set a ceiling to add sets instead of reps forever.')}
     </div>}
-    <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} routine={routine} unit={st.unit} />
+    <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} existing={existing} routine={routine} unit={st.unit} />
     <Button variant="primary" onClick={save}>{existing ? t('Save') : t('Add to routine')}</Button>
     {ex.custom && <><div style={{ height: 8 }} /><Button icon="pencil" onClick={() => { close(); customExSheet(ex) }}>{t('Edit or delete this exercise')}</Button></>}
     {onDelete && <><div style={{ height: 8 }} /><Button variant="danger" onClick={() => { close(); onDelete() }}>{t('Remove from routine')}</Button></>}
@@ -850,7 +909,7 @@ export function beginWorkout(routineId, bw) {
   // kept on the entry purely so the workout can explain the number it chose.
   const entries = (r ? r.ex : []).map(cfg => {
     const plan = nextPrescription(st, cfg, r)
-    const target = { ...cfg, ...(plan.policy === 'confirmed_rep_range' ? { prog: plan.policy } : {}), ...(plan.reps != null ? { reps: plan.reps, targetReps: plan.reps } : {}), ...(plan.restSeconds != null ? { restSeconds: plan.restSeconds } : {}), ...(plan.topRangeStreak != null ? { topRangeStreak: plan.topRangeStreak } : {}) }
+    const target = targetForPrescription(cfg, plan)
     return { id: cfg.id, sg: cfg.sg, target, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
   })
   update(s => {

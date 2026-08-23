@@ -2,16 +2,17 @@
 
 ## Metadata
 
-- Date: 2026-08-22
+- Date: 2026-08-23
 - Repository: `https://github.com/ruvelro/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
-- Base revision: `a5606ac588dba2c3f9946a10dd555c48e493681f`
+- Base revision for this recovery iteration: `c0f7c59`
 - Tester role: independent implementation review and regression testing
-- Overall result: **Code acceptance passed; Docker/browser smoke tests still outstanding**
+- Overall result: **Code acceptance passed; Docker and real-browser interaction tests remain outstanding**
 
 The initial integration review found one high-severity defect and two medium-severity
-configuration/UI problems. All three were corrected and are now covered by automated regression
-tests.
+configuration/UI problems. The recovery iteration then added a manual reset and an opt-in
+automatic reduction rule, and fixed the edge cases found while testing them. All code-level
+findings are now covered by automated regression tests.
 
 ## Environment
 
@@ -32,6 +33,14 @@ Tests       192 passed (192)
 
 No pre-existing frontend test failures were recorded.
 
+Before the manual reset and automatic recovery-reduction work started, the already-corrected
+Confirmed Rep-Range suite contained 218 passing tests in 9 files:
+
+```text
+Test Files  9 passed (9)
+Tests       218 passed (218)
+```
+
 ## Final automated test run
 
 Command:
@@ -44,13 +53,14 @@ npm.cmd test
 Result:
 
 ```text
-Test Files  9 passed (9)
-Tests       218 passed (218)
+Test Files  16 passed (16)
+Tests       265 passed (265)
 ```
 
-- Passed: 218
+- Passed: 265
 - Failed: 0
-- Tests added since baseline: 26
+- Tests added since the original 192-test baseline: 73
+- Tests added by the recovery reset/automatic-reduction iteration: 47
 - Result: **Pass**
 
 The new unit tests cover:
@@ -70,6 +80,15 @@ The new unit tests cover:
 - optional extra sets;
 - legacy configuration without the new fields;
 - isolation from workouts logged under another progression policy.
+- persistent manual recovery epochs and repeated resets;
+- pending reset behavior across discard, deletion and JSON round trips;
+- old workouts completed after a reset;
+- opt-in automatic recovery reduction after four successful sessions;
+- failure, base, maximum, epoch, strategy and recovery-level streak boundaries;
+- base edits without retroactive reinterpretation;
+- narrow rep ranges and simultaneous weight/recovery progression;
+- shared-plan round trips without private recovery history;
+- superset timer selection using the longest member recovery.
 
 ## Frontend production build
 
@@ -82,9 +101,37 @@ npm.cmd run build
 
 Result: **Pass**
 
-Vite transformed 105 modules and generated the production bundle successfully. The build emitted
+Vite transformed 111 modules and generated the production bundle successfully. The build emitted
 only a chunk-size warning. This warning is unrelated to Confirmed Rep-Range and does not fail the
 build.
+
+The generated bundle was then served locally:
+
+```powershell
+cd frontend
+npm.cmd run preview -- --host 127.0.0.1 --port 4177
+Invoke-WebRequest http://127.0.0.1:4177/ -UseBasicParsing
+```
+
+Result: HTTP `200`, root element present, **Pass**.
+
+Locale invariant:
+
+```powershell
+cd frontend
+node scripts/check-locales.mjs
+```
+
+Result: `11 locales, 667 keys each — in sync.`, **Pass**. Languages without native
+Confirmed Rep-Range copy use an explicit English fallback; Italian has complete translated copy.
+
+Patch integrity:
+
+```powershell
+git diff --check
+```
+
+Result: **Pass**. Git printed only the repository's existing Windows LF/CRLF conversion warnings.
 
 ## Backend checks
 
@@ -97,17 +144,32 @@ node --check server.js
 
 Result: **Pass**
 
-Direct API startup was also attempted with an isolated temporary data directory. Startup did not
-reach the health endpoint because the local Node 26 runtime could not resolve a transitive
-WebAuthn module:
+Dependencies were installed from `api/package-lock.json`, then the API was started on port 3107
+with an isolated temporary data directory. The temporary directory was removed after the test.
 
-```text
-ERR_MODULE_NOT_FOUND
-@peculiar/asn1-schema/build/es2015/schema.js
+```powershell
+cd api
+npm.cmd ci --ignore-scripts
+$env:DATA_DIR='E:\Workspace\openGym\.tmp-api-rest-feature'
+$env:PORT='3107'
+$env:RP_ID='localhost'
+$env:ORIGIN='http://localhost:3107'
+node server.js
 ```
 
-No modified application file participates in this import failure. The API should be retested with
-the Node version used by the project Docker image.
+Health check from a second terminal:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3107/api/health
+```
+
+Result:
+
+```json
+{"ok":true,"users":0}
+```
+
+Result: **Pass**
 
 ## Docker checks
 
@@ -677,6 +739,348 @@ Failure case:
 Acceptance criterion: the fourth set neither causes a failure nor rescues a failure in the first
 three prescribed sets.
 
+## Recovery reset and automatic reduction — accepted behavior
+
+### Scientific review and threshold decision
+
+Search and verification were completed on 2026-08-23 using PubMed, PMC, journal DOI pages and
+the 2026 ACSM position stand. The important negative finding is explicit: **no identified study
+tested “reduce recovery by 30 seconds after N consecutive successful workouts.”** The implemented
+rule is therefore evidence-informed and deliberately conservative, not a clinically validated
+universal threshold.
+
+| Evidence | Design and comparison | Relevant result | Applicability limit |
+|---|---|---|---|
+| [Willardson & Burkett 2005](https://pubmed.ncbi.nlm.nih.gov/15705039/) | Acute crossover, 15 trained men, 1 vs 2 vs 5 min | More repetitions/volume with longer recovery; 5 > 2 > 1 min | Acute and no cross-session algorithm |
+| [Ratamess et al. 2007](https://pubmed.ncbi.nlm.nih.gov/17237951/) | Acute, 8 trained men, bench press with 30 s to 5 min | Short intervals caused larger repetition declines across sets | Small, acute study |
+| [Senna et al. 2016](https://pubmed.ncbi.nlm.nih.gov/26907842/) | Acute crossover, 15 trained men, five 3RM sets, 1/2/3/5 min | At least 2 min better preserved single-joint performance; 3–5 min better for bench press | Near-maximal work; does not provide N |
+| [Schoenfeld et al. 2016](https://pubmed.ncbi.nlm.nih.gov/26605807/) | RCT, 21 trained men, 8 weeks, 1 vs 3 min | 3 min produced greater strength gains and some hypertrophy advantages | Small male-only study; fixed intervals |
+| [de Salles et al. 2010](https://pubmed.ncbi.nlm.nih.gov/19811949/) | 36 trained men, 16 weeks, 1 vs 3 vs 5 min | Longer intervals favored some strength outcomes | No adaptive/decreasing rule |
+| [Ahtiainen et al. 2005](https://pubmed.ncbi.nlm.nih.gov/16095405/) | 13 trained men, six months, 2 vs 5 min with volume equated | Similar strength and cross-sectional-area gains | Very small sample; protocols differed beyond time |
+| [Buresh et al. 2009](https://pubmed.ncbi.nlm.nih.gov/19077743/) | 12 untrained men, 10 weeks, 1 vs 2.5 min | Strength similar; greater arm CSA in longer-rest group | Six participants per group |
+| [de Souza et al. 2010](https://pubmed.ncbi.nlm.nih.gov/20543741/) | RCT, 20 recreationally trained men, constant 120 s vs gradual 120→30 s | Similar short-term strength/CSA, but decreasing-rest volume was 9.4% lower for bench and 13.9% lower for squat | Calendar-based decrease, small study, not a non-inferiority trial |
+| [Souza-Junior et al. 2011](https://pmc.ncbi.nlm.nih.gov/articles/PMC3215636/) | RCT, 22 trained men using creatine, 120 s constant vs −15 s/week to 30 s | Similar group-level strength/CSA; constant-rest volume was 22.9% higher for bench and 14.6% higher for squat | Calendar-based, creatine in both groups, small study; performance worsened at shorter intervals |
+| [Longo et al. 2022](https://pubmed.ncbi.nlm.nih.gov/35622106/) | 28 untrained adults, knee extension, 1 vs 3 min with/equalized volume variants | Similar 1RM; hypertrophy followed achieved volume more than interval alone | Single-joint, untrained; short-rest groups needed extra work |
+| [Simão et al. 2022](https://pubmed.ncbi.nlm.nih.gov/32826830/) | 33 trained men, 75 s fixed vs self-selected | Self-selected rest allowed more repetitions; strength gains were similar | Upper body only; not automatic reduction |
+| [Grgic et al. 2018](https://pubmed.ncbi.nlm.nih.gov/28933024/) | Systematic review, 23 studies/491 participants | Short rest can work, but >2 min appears useful to maximize strength in trained people; 60–120 s may suffice for untrained people | Heterogeneous studies; no decrement threshold |
+| [Singer et al. 2024](https://pubmed.ncbi.nlm.nih.gov/39205815/) | Systematic review/Bayesian meta-analysis, 9 studies/19 measures | Small central tendency favoring >60 s, likely mediated by volume; no appreciable difference detected above 90 s | Few studies and substantial heterogeneity |
+| [Zhang et al. 2026](https://pubmed.ncbi.nlm.nih.gov/41549493/) | Randomized crossover, 20 adults, fixed/self-selected/repetition-adjusted rest | Repetition-based adjustment improved volume versus fixed 3 min and was more time-efficient than self-selected rest | Intra-session and mainly increased rest; does not test N or chronic −30 s |
+| [ACSM 2026 position stand](https://pmc.ncbi.nlm.nih.gov/articles/PMC12965823/) | Overview of 137 reviews and more than 30,000 participants | Current aggregate evidence is insufficient to define a universal inter-set-rest effect for hypertrophy | Broad categories; does not validate this algorithm |
+
+Decision:
+
+- `N = 4` successful sessions is the default.
+- The two closest decreasing-rest trials trained each exercise about twice weekly and reduced
+  recovery by 15 seconds per week. A 30-second change therefore spans about two weeks, or four
+  exercise exposures.
+- Those studies reduced on a calendar, not after success. Converting four exposures into four
+  successful exposures is a conservative product inference.
+- The automatic mode is **off by default**. This avoids silently applying a heuristic to legacy
+  users and to lifters whose goal benefits from longer recovery.
+- openGym reduces only recovery that is above the user-defined base and immediately reverses the
+  step after a later-set failure. The research protocols went as low as 30 seconds; openGym never
+  crosses the configured base.
+
+### Exact domain rule
+
+Manual mode is the backward-compatible default. Automatic mode is stored as
+`restReductionStrategy: "auto_after_successes"`.
+
+A session counts toward automatic reduction only when:
+
+1. it was logged under Confirmed Rep-Range;
+2. every prescribed set reached the prescribed repetitions;
+3. its target snapshot says automatic reduction was enabled;
+4. it belongs to the current manual-reset epoch;
+5. it used the same **prescribed** `restSeconds` as the current effective value;
+6. its snapshotted `restBaseSeconds` equals the current configured base.
+
+Four qualifying sessions produce:
+
+```text
+next recovery = max(configured base, current recovery - 30 seconds)
+automatic success count = 0
+```
+
+Weight is not a streak boundary. In a narrow range, the fourth success can legitimately produce
+both a weight increase and a 30-second recovery reduction in the same next prescription. This is
+necessary for the rule to remain reachable in ranges such as 8–8 and 8–10, and matches the
+exposure-based evidence used to choose N. The mode is opt-in, and a later-set failure adds the
+30 seconds back.
+
+The application currently records the **prescribed** recovery, not the number of seconds the user
+actually waited after using `+15`, `−15` or Skip. The UI and this report intentionally say
+“prescribed with this recovery”; success is not proof that the exact duration was observed.
+
+### Manual reset data model
+
+The reset does not rewrite workout history. It writes one profile-level control keyed by exercise:
+
+```json
+{
+  "progressionControls": {
+    "exercise-id": {
+      "confirmedRepRangeRest": {
+        "epochId": "generated-id",
+        "resetSeconds": 120,
+        "resetAt": 1787430000000
+      }
+    }
+  }
+}
+```
+
+New workout targets snapshot the fields needed for deterministic reconstruction:
+
+```json
+{
+  "prog": "confirmed_rep_range",
+  "restSeconds": 150,
+  "restBaseSeconds": 120,
+  "restEpochId": "generated-id",
+  "restReductionStrategy": "auto_after_successes",
+  "restSuccessStreak": 1,
+  "restSource": "carried"
+}
+```
+
+Only recovery calculation filters on `restEpochId`. Weight, target repetitions and top-range
+confirmation continue to use the complete Confirmed Rep-Range history. Old JSON has no
+`progressionControls`, `restEpochId` or `restBaseSeconds`; missing values select manual mode and
+legacy history without a migration.
+
+The control is global per exercise id because the existing progression history is also global per
+exercise id. A reset therefore applies to that exercise in every routine, subject to each
+configuration's maximum. The confirmation dialog states this explicitly.
+
+### Scenario acceptance matrix
+
+| ID | Scenario | Expected result | Automated result |
+|---|---|---|---|
+| REST-001 | Effective 180, base 120, press manual reset | Next workout uses 120 | Pass |
+| REST-002 | Reset after weight/rep/top-range progress | Only recovery changes | Pass |
+| REST-003 | Inspect completed workouts after reset | Historical targets remain byte-for-byte untouched | Pass |
+| REST-004 | Reset while an old workout is active | Active snapshot stays old; following workout uses new epoch/base | Pass |
+| REST-005 | Start then discard reset-epoch workout | Reset remains pending | Pass |
+| REST-006 | Complete then delete every post-reset workout | Old recovery never resurrects; reset becomes pending again | Pass |
+| REST-007 | Reset twice before another workout | Newest epoch wins | Pass |
+| REST-008 | Strategy inherited from routine | Reset is applied | Pass |
+| REST-009 | Same exercise in two routines | Shared reset control is visible to both | Pass |
+| REST-010 | JSON serialize/reload after reset | Same next prescription | Pass |
+| REST-011 | Legacy/malformed/missing control | Safely treated as no reset | Pass |
+| REST-012 | Explicit zero-second base | Zero remains valid; no truthy fallback to profile timer | Pass |
+| AUTO-001 | Automatic mode omitted/unknown | Manual behavior, no decrease | Pass |
+| AUTO-002 | 1, 2 or 3 qualifying successes at 180 | Stay at 180; show 1/4, 2/4 or 3/4 | Pass |
+| AUTO-003 | Fourth qualifying success at 180, base 120 | Next recovery 150; count resets | Pass |
+| AUTO-004 | Four successes at 130, base 120 | Next recovery exactly 120 | Pass |
+| AUTO-005 | Already at base | Never decrease and do not accumulate a useless count | Pass |
+| AUTO-006 | Any prescribed-set failure | Automatic count resets | Pass |
+| AUTO-007 | First set fails | Recovery stays unchanged; count resets | Pass |
+| AUTO-008 | First set succeeds, later set fails | Recovery +30 up to maximum; count resets | Pass |
+| AUTO-009 | Maximum was edited below effective recovery | Failure never causes a paradoxical decrease | Pass |
+| AUTO-010 | Manual reset during automatic count | New epoch starts count at zero | Pass |
+| AUTO-011 | Stale old-epoch workout appended later | Ignored for current-epoch recovery/count | Pass |
+| AUTO-012 | Automatic mode enabled after manual sessions | Manual sessions are not reused | Pass |
+| AUTO-013 | Automatic mode disabled | Effective recovery carries; no automatic count/reduction | Pass |
+| AUTO-014 | Base changes from 120 to 90 after old successes | No retroactive instant decrease; new observation window | Pass |
+| AUTO-015 | Automatic 180→150 then one success at 150 | New count is 1/4, not old count + 1 | Pass |
+| AUTO-016 | Range 8–10, fourth success also increases weight | Weight rises and recovery becomes 150 | Pass |
+| TIMER-001 | Plan and target contain different recovery snapshots | Immutable plan value wins | Pass |
+| TIMER-002 | Superset members prescribe 180 and 120 | Between-round timer uses 180 regardless of order | Pass |
+| SHARE-001 | Export/import CRRP routine | Base/max/strategy round-trip; epoch/history excluded | Pass |
+| LOCALE-001 | Run locale invariant | 11 dictionaries have identical 667-key sets | Pass |
+
+### Defects found and corrected during this iteration
+
+1. A maximum edited below the current recovery made a failure reduce recovery via
+   `min(max, rest + 30)`. The failure path now never decreases it.
+2. A stale workout from another epoch appended after new-epoch successes broke the automatic
+   suffix. Foreign epochs are now filtered before counting.
+3. Lowering the base could reinterpret four old at-base sessions and decrease immediately.
+   `restBaseSeconds` is now snapshotted and base edits open a new observation window.
+4. The same-weight guard made automatic reduction unreachable in narrow rep ranges. The rule now
+   follows successful exposures, consistent with the selected evidence.
+5. A new unsaved exercise could expose an immediate reset and leave an orphan control if canceled.
+   New exercises now show preview-only state until saved.
+6. The configuration sheet could keep showing Confirmed Rep-Range state after the draft selected
+   another policy. The panel now follows the active draft policy.
+7. `restWhy` existed in the domain but was not shown during the workout. A timer explanation is
+   now displayed beside the progression explanation.
+8. CRRP plan sharing dropped min/max/target/base/max/automatic strategy. Those configuration
+   fields now round-trip while private epochs and history remain excluded.
+9. A superset used only the last member's recovery, ignoring a longer CRRP prescription on another
+   member. The timer now selects the maximum recovery in the unit.
+10. Confirmed Rep-Range translation keys existed only in Italian. All locale dictionaries now
+    explicitly share the same keys; untranslated copy falls back to English.
+
+### Automated test files for the recovery iteration
+
+| File | Primary responsibility |
+|---|---|
+| `confirmedRepRangeRest.test.js` | Reset record validation, pure/mutable apply, legacy controls, repeated reset |
+| `confirmedRepRangeRestProgression.test.js` | Epoch separation, unchanged load/rep streak, zero base, lowered maximum |
+| `confirmedRepRangeAutoRest.test.js` | Threshold, floor, failure, strategy/base/rest/epoch boundaries |
+| `confirmedRepRangeAutoRest.integration.test.js` | Full next-prescription behavior, narrow ranges, base changes, reset interaction |
+| `confirmed-rep-range.integration.test.js` | Workout snapshots, timer, discard/delete/active-old-workout/routine inheritance |
+| `workout-prescription.test.js` | Centralized immutable target snapshots |
+| `workout-timer.test.js` | Snapshot priority and superset maximum recovery |
+| `plan-share.test.js` | Public configuration round trip without private runtime state |
+| `confirmedRepRangeConfig.test.js` | Backward-compatible manual default and strategy normalization |
+
+### How to reproduce the automated verification
+
+From a clean checkout of this branch:
+
+```powershell
+cd E:\Workspace\openGym\frontend
+npm.cmd ci
+npm.cmd test
+node scripts/check-locales.mjs
+npm.cmd run build
+```
+
+Expected results for this revision:
+
+```text
+Test Files  16 passed (16)
+Tests       265 passed (265)
+11 locales, 667 keys each — in sync.
+Vite production build: success (111 modules transformed)
+```
+
+Run only the recovery-focused tests while developing:
+
+```powershell
+cd E:\Workspace\openGym\frontend
+npm.cmd test -- confirmedRepRangeAutoRest confirmedRepRangeRestProgression workout-prescription workout-timer plan-share confirmed-rep-range.integration progression confirmedRepRangeConfig
+```
+
+Expected focused result: `9 passed` files, `128 passed` tests.
+
+Backend syntax/startup smoke test:
+
+```powershell
+cd E:\Workspace\openGym\api
+npm.cmd ci --ignore-scripts
+node --check server.js
+$env:DATA_DIR='E:\Workspace\openGym\.tmp-api-rest-feature'
+$env:PORT='3107'
+$env:RP_ID='localhost'
+$env:ORIGIN='http://localhost:3107'
+node server.js
+```
+
+In a second terminal:
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:3107/api/health
+```
+
+Stop the server with `Ctrl+C`. Remove only the explicitly created temporary directory after
+verifying its resolved path is inside the repository.
+
+### How to reproduce the manual reset in the UI
+
+1. Configure an exercise with Confirmed Rep-Range, base recovery 120 s and maximum 240 s.
+2. Complete the first prescribed set, then miss a later prescribed set. Repeat once so effective
+   recovery reaches 180 s.
+3. Reopen the exercise configuration.
+4. Verify the sheet shows `Initial recovery: 120s` and `Effective recovery: 180s`, plus the reason.
+5. Press `Reset recovery to 120s` and read the confirmation describing future-only/global scope.
+6. Confirm the reset.
+7. Verify the effective next recovery becomes 120 s while weight, target reps and top-range
+   confirmation stay unchanged.
+8. Open an old completed workout and confirm its captured recovery is still 150/180 s.
+9. Start the next workout and confirm its target/plan and timer use 120 s.
+10. Refresh before completing it; confirm the active snapshot remains 120 s.
+
+Active-workout boundary variant:
+
+1. Start a workout while effective recovery is 180 s.
+2. Without completing it, perform the reset from another browser/device or persisted state.
+3. Confirm the already-started workout remains at 180 s.
+4. Complete or discard it.
+5. Confirm the next newly built workout uses 120 s.
+
+### How to reproduce automatic −30 seconds
+
+1. Produce an effective recovery above base, for example base 120 s/effective 180 s.
+2. Enable `Automatic recovery reduction` and save.
+3. Complete every prescribed set successfully in four consecutive workouts that all prescribe
+   180 s. The target reps may change; weight may also change.
+4. After workouts 1–3, confirm the UI reports 1/4, 2/4 and 3/4.
+5. After workout 4, start or preview the next workout.
+6. Confirm recovery is 150 s, source/reason says automatic decrease, and the count is 0/4.
+7. Complete four successful workouts prescribed at 150 s.
+8. Confirm the next value is 120 s, never 90 s.
+
+Failure reversal:
+
+1. After automatic recovery becomes 150 s, complete the first set at target and miss a later set.
+2. Confirm the next recovery returns to 180 s and automatic count is zero.
+3. Alternatively miss the first set; confirm recovery stays 150 s and count resets. Inter-set
+   recovery did not precede the first set, so the algorithm does not attribute that miss to it.
+
+Narrow-range variant:
+
+1. Configure min 8, max 10, base 120, effective 180 and automatic mode.
+2. Successfully complete targets 8, 9, 10 and the second top-range confirmation at 10.
+3. Confirm the next prescription increases weight, resets target to 8 and reduces recovery to
+   150 s in the same transition.
+
+Base-edit variant:
+
+1. Accumulate successful automatic-mode sessions at base 120 s.
+2. Change the initial recovery to 90 s and save.
+3. Confirm effective recovery remains 120 s and automatic progress restarts at 0/4.
+4. Complete four clean sessions prescribed at 120 s.
+5. Confirm recovery then becomes 90 s.
+
+Superset variant:
+
+1. Put two exercises in one superset; prescribe 180 s to the first and 120 s to the second.
+2. Complete one full round.
+3. Confirm the between-round timer starts at 180 s regardless of member order.
+
+### Persistence and synchronization reproduction
+
+Browser/local persistence:
+
+1. Perform a manual reset and optionally accumulate 1–3 automatic successes.
+2. Inspect `gym_state_v1` in browser local storage and record `progressionControls`, active
+   `plan` and `target`.
+3. Refresh and compare the values.
+4. Close/reopen the browser and compare again.
+
+Server synchronization:
+
+1. Sign in with a disposable profile and perform the reset.
+2. Wait at least two seconds for the debounced push, or background the tab to flush it.
+3. Open a second signed-in browser, pull state and verify the same epoch/effective recovery.
+4. Complete one workout on the second browser, sync, then verify the next prescription on the
+   first browser.
+
+Plan sharing:
+
+1. Export a plan containing automatic Confirmed Rep-Range settings.
+2. Import it into a disposable profile.
+3. Verify min/max/initial target/base/maximum/automatic mode are present.
+4. Verify no recovery epoch or workout history traveled with the plan.
+
+Docker/CasaOS persistence remains a manual release gate because Docker is unavailable here:
+
+```powershell
+docker compose config --quiet
+docker compose up --build -d
+docker compose ps
+curl.exe --fail http://localhost:8080/api/health
+curl.exe --fail --head http://localhost:8080/
+```
+
+After creating/resetting state, run `docker compose down` **without `-v`**, then
+`docker compose up -d` and repeat the checks. `down -v` intentionally deletes persisted data and
+must not be used for this test.
+
 ## Evidence template
 
 Use this block for every manual execution:
@@ -719,9 +1123,15 @@ Before release, add automated or manual verification for:
 
 **The code-level acceptance gate is passed.**
 
-CRRP-001, CRRP-002 and CRRP-003 are resolved and protected by automated tests. The complete
-frontend suite, production build and backend syntax check pass. Release remains conditional on
-the Docker and real-browser smoke tests that cannot run in the current environment.
+CRRP-001, CRRP-002 and CRRP-003 remain resolved. Manual reset, automatic reduction, base/epoch
+snapshots, range changes, timer integration, plan sharing and the edge-case fixes listed above are
+protected by 265 passing tests. The production build, locale invariant, frontend HTTP smoke,
+backend syntax/startup and API health checks pass.
+
+Release remains conditional on Docker/CasaOS persistence and real-browser interaction checks that
+cannot run in this environment. This is an infrastructure/UI automation limitation, not a known
+code failure. The automatic strategy must continue to be described as opt-in and evidence-informed,
+not as a scientifically proven universal prescription.
 
 After the fixes, rerun:
 

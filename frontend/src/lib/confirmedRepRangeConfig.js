@@ -1,9 +1,15 @@
+import {
+  CONFIRMED_REST_REDUCTION_MANUAL,
+  confirmedRestReductionStrategy
+} from './confirmedRepRangeAutoRest.js'
+
 export const CONFIRMED_REP_RANGE_DEFAULTS = {
   minReps: 8,
   maxReps: 12,
   targetReps: 8,
   restSeconds: 90,
   maxRestSeconds: 240,
+  restReductionStrategy: CONFIRMED_REST_REDUCTION_MANUAL,
   topRangeStreak: 0
 }
 
@@ -15,5 +21,6 @@ export function confirmedRepRangeConfig(cfg = {}, profileRestSeconds = CONFIRMED
   const targetReps = Math.min(maxReps, Math.max(minReps, Math.round(cfg.targetReps ?? minReps)))
   const restSeconds = Math.max(0, Math.round(cfg.restSeconds ?? profileRestSeconds ?? CONFIRMED_REP_RANGE_DEFAULTS.restSeconds))
   const maxRestSeconds = Math.max(restSeconds, Math.round(cfg.maxRestSeconds ?? CONFIRMED_REP_RANGE_DEFAULTS.maxRestSeconds))
-  return { minReps, maxReps, targetReps, restSeconds, maxRestSeconds, topRangeStreak: 0 }
+  const restReductionStrategy = confirmedRestReductionStrategy(cfg.restReductionStrategy)
+  return { minReps, maxReps, targetReps, restSeconds, maxRestSeconds, restReductionStrategy, topRangeStreak: 0 }
 }

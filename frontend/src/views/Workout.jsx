@@ -14,7 +14,8 @@ import Icon from '../components/Icon.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { nextPrescription, applyPrescription } from '../lib/progression.js'
 import { glyphOf } from '../lib/glyphs.js'
-import { restSecondsFor } from '../lib/workout-timer.js'
+import { restSecondsForUnit } from '../lib/workout-timer.js'
+import { targetForPrescription } from '../lib/workout-prescription.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -129,6 +130,10 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
       <Icon name={plan.kind === 'up' ? 'arrowUp' : plan.kind === 'deload' ? 'arrowDown' : 'lightbulb'} />
       <span>{t(...plan.why)}</span>
     </div>}
+    {plan && plan.restWhy && plan.kind !== 'off' && <div className="progline">
+      <Icon name="timer" />
+      <span>{t(...plan.restWhy)}</span>
+    </div>}
     <div className="card" style={{ marginTop: 10, marginBottom: 0 }}>
       {/* the header carries the same eff3 sizing as the rows, or the labels drift off their columns */}
       <div className={'sethead' + (col3 ? ' eff3' : '')}><span className="n-sp" /><span className="w-sp">{col1.hd}</span>{col2 && <span className="r-sp">{col2.hd}</span>}{col3 && <span className="eff-sp">{col3.hd}</span>}{timed && <span className="ck-sp" />}<span className="ck-sp" /></div>
@@ -207,7 +212,10 @@ function ActiveWorkout() {
         beep(S.sound, 1040, 0.12); vibrate(30)
         const isLastExInUnit = idx === unit[unit.length - 1]
         const unitDone = unit.every(ui => (ui === idx ? e : A.entries[ui]).sets.every(x => x.done))
-        if (isLastExInUnit && !unitDone) startRest(restSecondsFor(e, S.restSec))
+        if (isLastExInUnit && !unitDone) {
+          const unitEntries = unit.map(ui => ui === idx ? e : A.entries[ui])
+          startRest(restSecondsForUnit(unitEntries, S.restSec))
+        }
         else if (unitDone) stopRest()
         if (unitDone && isLastUnit) workoutDone = true      // last exercise's last set → done
         // Only loaded reps training has a "working weight" worth confirming — a bodyweight
@@ -285,7 +293,7 @@ function ActiveWorkout() {
     <Button onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => update(s => {
       const full = { ...cfg, id: ex.id }
       const plan = nextPrescription(s, full, s.routines.find(r => r.id === s.active.routineId))
-      const target = { ...cfg, ...(plan.policy === 'confirmed_rep_range' ? { prog: plan.policy } : {}), ...(plan.reps != null ? { reps: plan.reps, targetReps: plan.reps } : {}), ...(plan.restSeconds != null ? { restSeconds: plan.restSeconds } : {}), ...(plan.topRangeStreak != null ? { topRangeStreak: plan.topRangeStreak } : {}) }
+      const target = targetForPrescription(cfg, plan)
       s.active.entries.push({ id: ex.id, target, plan, sets: applyPrescription(buildSets(s, full), plan) })
       s.active.cur = s.active.entries.length - 1
     }), null, S.routines.find(r => r.id === A.routineId)))} icon="plus">{t('Add exercise')}</Button>

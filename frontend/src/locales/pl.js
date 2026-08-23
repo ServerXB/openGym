@@ -1,5 +1,8 @@
 // Polish UI strings. Keys are the English source strings (see lib/i18n.js).
+import confirmedRepRangeFallback from '../lib/confirmedRepRangeLocaleFallback.js'
+
 export default {
+  ...confirmedRepRangeFallback,
   'Confirm': 'Potwierdź',
   'Cancel': 'Anuluj',
   'Delete': 'Usuń',

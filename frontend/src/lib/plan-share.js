@@ -44,6 +44,14 @@ function cleanEx(e) {
   if (e.inc > 0) o.inc = e.inc
   if (e.repsMin != null) o.repsMin = e.repsMin
   if (e.repsMax != null) o.repsMax = e.repsMax
+  // Confirmed Rep-Range configuration is part of the plan. Runtime recovery controls,
+  // epochs and streak snapshots intentionally are not: a recipient starts with clean history.
+  for (const field of [
+    'minReps', 'maxReps', 'targetReps', 'restSeconds', 'maxRestSeconds',
+    'restReductionStrategy'
+  ]) {
+    if (e[field] != null) o[field] = e[field]
+  }
   if (e.sg) o.sg = e.sg
   return o
 }
