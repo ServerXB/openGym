@@ -9,12 +9,19 @@
 //     a page break — each exercise, and each routine that fits, stays in one place.
 
 import { EXIDX, isBodyweightEq } from './exercises.js'
-import { modeOf, fmtSec, isBw, isPerSide, sideReps } from './history.js'
-import { uid, todayISO, DAYN, fmtNum, exCount } from './format.js'
+import { modeOf, fmtSec, isBw, isPerSide, sideReps, confirmedRepRangeBounds } from './history.js'
+import { uid, todayISO, DAYN, fmtLoad, fmtNum, exCount } from './format.js'
 import { t } from './i18n.js'
 
 const PLAN_FMT = 1
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]   // Mon-first, matching the Plan screen
+
+const planIncrement = value => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  const rounded = Math.round((n + Number.EPSILON) * 100) / 100
+  return rounded >= 0.01 ? rounded : null
+}
 
 // Keep only the meaningful config fields, so the file stays small and readable.
 function cleanEx(e) {
@@ -41,13 +48,19 @@ function cleanEx(e) {
   // Progression settings travel with the plan — a shared Greyskull routine that arrives
   // without its rule is just a list of weights.
   if (e.prog) o.prog = e.prog
-  if (e.inc > 0) o.inc = e.inc
+  // New files always use the canonical field. A plan from the short-lived legacy shape may
+  // only have `weightIncrement`; promote it on export, but never let a stale legacy value
+  // override an explicitly present (even if invalid) canonical field.
+  const inc = Object.prototype.hasOwnProperty.call(e, 'inc')
+    ? planIncrement(e.inc)
+    : planIncrement(e.weightIncrement)
+  if (inc != null) o.inc = inc
   if (e.repsMin != null) o.repsMin = e.repsMin
   if (e.repsMax != null) o.repsMax = e.repsMax
   // Confirmed Rep-Range configuration is part of the plan. Runtime recovery controls,
   // epochs and streak snapshots intentionally are not: a recipient starts with clean history.
   for (const field of [
-    'minReps', 'maxReps', 'targetReps', 'restSeconds', 'maxRestSeconds',
+    'minReps', 'maxReps', 'restSeconds', 'maxRestSeconds',
     'restReductionStrategy'
   ]) {
     if (e[field] != null) o[field] = e[field]
@@ -87,13 +100,27 @@ export function parsePlan(raw) {
   const customEx = (Array.isArray(data.customEx) ? data.customEx : []).filter(c => c && c.id)
   const known = new Set(customEx.map(c => c.id))
   let dropped = 0
+  const publicExerciseConfig = e => {
+    // Runtime prescription/recovery state is private history, never routine configuration.
+    // Tolerate old or hand-edited bundles, but discard these fields at the import boundary.
+    const {
+      topRangeStreak: _topRangeStreak,
+      restEpochId: _restEpochId,
+      restResetPending: _restResetPending,
+      restSource: _restSource,
+      restBaseSeconds: _restBaseSeconds,
+      restSuccessStreak: _restSuccessStreak,
+      ...config
+    } = e
+    return config
+  }
   const routines = data.routines.filter(r => r && Array.isArray(r.ex)).map(r => ({
     ...r,
     ex: r.ex.filter(e => {
       const ok = !!e && (known.has(e.id) || !!EXIDX[e.id])
       if (!ok) dropped++
       return ok
-    })
+    }).map(publicExerciseConfig)
   }))
   return {
     name: (data.name || '').trim(),
@@ -151,17 +178,26 @@ const esc = str => String(str == null ? '' : str)
   .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 // One exercise's scheme, e.g. "3 × 10 · 60 kg", "3 × 0:45" or "2 × 20 min @ 8 km/h".
-function scheme(e, unit) {
+function scheme(e, unit, routine) {
   const sets = e.sets || 1
   const mode = modeOf(e)
   if (mode === 'cardio') {
     const body = `${e.min || 20} min @ ${fmtNum(e.speed || 8)} km/h`
     return sets > 1 ? `${sets} × ${body}` : body
   }
-  let s = mode === 'time' ? `${sets} × ${fmtSec(e.sec || 45)}` : `${sets} × ${e.reps ?? 10}`
-  if (e.weight) s += ` · ${isBw(e) ? '+' : ''}${fmtNum(e.weight)} ${unit}`
+  const confirmed = (e.prog || routine?.prog) === 'confirmed_rep_range'
+  const { minReps, maxReps } = confirmedRepRangeBounds(e)
+  let s = mode === 'time'
+    ? `${sets} × ${fmtSec(e.sec || 45)}`
+    : confirmed ? `${sets} × ${fmtNum(minReps)}–${fmtNum(maxReps)}` : `${sets} × ${e.reps ?? 10}`
+  if (e.weight) s += ` · ${isBw(e) ? '+' : ''}${fmtLoad(e.weight)} ${unit}`
   // A printed plan is read at the rack, so the split earns its four characters.
-  if (mode !== 'time' && isPerSide(e)) s += ` · ${t('{0}/side', fmtNum(sideReps(e.reps ?? 10)))}`
+  if (mode !== 'time' && isPerSide(e)) {
+    const perSide = confirmed
+      ? `${fmtNum(sideReps(minReps))}–${fmtNum(sideReps(maxReps))}`
+      : fmtNum(sideReps(e.reps ?? 10))
+    s += ` · ${t('{0}/side', perSide)}`
+  }
   return s
 }
 
@@ -182,7 +218,7 @@ function routineHTML(r, unit) {
       const ex = EXIDX[e.id]
       const name = ex ? ex.n : t('Unknown exercise')
       const part = ex && ex.bp && ex.bp !== 'cardio' ? `<span class="part">${esc(ex.bp)}</span>` : ''
-      return `<div class="ex"><div class="ex-n">${esc(name)}${part}</div><div class="ex-s">${esc(scheme(e, unit))}</div></div>`
+      return `<div class="ex"><div class="ex-n">${esc(name)}${part}</div><div class="ex-s">${esc(scheme(e, unit, r))}</div></div>`
     }).join('')
     return u.length > 1
       ? `<div class="ss"><div class="ss-tag">${esc(t('Superset'))}</div><div class="ss-items">${items}</div></div>`

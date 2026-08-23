@@ -1,5 +1,5 @@
 // Pure helpers over the state object S (ported 1:1 from the vanilla app).
-import { todayISO, isoOf, weekKey, fmtNum } from './format.js'
+import { todayISO, isoOf, weekKey, fmtLoad, fmtNum } from './format.js'
 import { isCardio, isBodyweightEq } from './exercises.js'
 import { t } from './i18n.js'
 
@@ -39,6 +39,22 @@ export const sideReps = reps => (reps || 0) / 2
 // Unilateral work moves in pairs, so its rep target steps by two — 16, 18, 20 — and a total
 // that stayed odd would put a rep on one side and not the other.
 export const repStep = cfg => (isPerSide(cfg) ? 2 : 1)
+
+// Readable Confirmed summaries must use the same defaults and unilateral parity as the
+// prescription. Kept here (rather than importing the strategy normalizer back into history)
+// to avoid a history -> config -> history module cycle.
+export function confirmedRepRangeBounds(cfg = {}) {
+  const step = repStep(cfg)
+  const bound = (value, fallback) => {
+    const parsed = Number(value ?? fallback)
+    const safe = Number.isFinite(parsed) ? parsed : fallback
+    const rounded = Math.max(1, Math.round(safe))
+    return Math.ceil(rounded / step) * step
+  }
+  const minReps = bound(cfg.minReps ?? cfg.repsMin, 8)
+  const maxReps = Math.max(minReps, bound(cfg.maxReps ?? cfg.repsMax, 12))
+  return { minReps, maxReps }
+}
 
 // mm:ss for a work duration — seconds alone read badly past a minute ("90 s" vs "1:30").
 export function fmtSec(sec) {
@@ -95,17 +111,17 @@ export function setLabel(id, s, cfg) {
   const c = cfg || { id }
   const mode = modeOf(c)
   if (mode === 'cardio') return `${s.min || 0} min @ ${fmtNum(s.speed || 0)} km/h`
-  if (mode === 'time') return fmtSec(s.sec) + (s.w > 0 ? ` · ${fmtNum(s.w)}` : '')
+  if (mode === 'time') return fmtSec(s.sec) + (s.w > 0 ? ` · ${fmtLoad(s.w)}` : '')
   // Bodyweight reads as what you did — "12", or "+10 × 12" once there is a belt involved —
   // rather than "0×12", which says a set was performed with no weight and means nothing.
   // A per-side set needs no mark here: the number logged is the total, the same as every
   // other set in the app.
   const reps = s.r || 0
   if (isBw({ ...c, id: c.id ?? id })) {
-    const load = s.w > 0 ? `+${fmtNum(s.w)} × ` : ''
+    const load = s.w > 0 ? `+${fmtLoad(s.w)} × ` : ''
     return `${load}${reps}` + effortTail(s)
   }
-  return `${fmtNum(s.w || 0)}×${reps}` + effortTail(s)
+  return `${fmtLoad(s.w || 0)}×${reps}` + effortTail(s)
 }
 // Default config for a freshly added exercise.
 export function defaultConfig(id, mode) {
@@ -119,16 +135,25 @@ export function defaultConfig(id, mode) {
 }
 // One-line summary of a planned exercise ("3 × 10 · 60 kg"), shared by the routine editor
 // and the plan export so a mode is described the same way everywhere.
-export function exLine(cfg, unit) {
+export function exLine(cfg, unit, routine) {
   const mode = modeOf(cfg)
   const n = cfg.sets || 1
   // Added weight reads as added: "+10 kg" on a dip belt, "60 kg" on a barbell.
-  const load = cfg.weight ? ' · ' + (isBw(cfg) ? '+' : '') + fmtNum(cfg.weight) + ' ' + unit : ''
+  const load = cfg.weight ? ' · ' + (isBw(cfg) ? '+' : '') + fmtLoad(cfg.weight) + ' ' + unit : ''
   if (mode === 'cardio') return `${n} × ${cfg.min || 20} min @ ${fmtNum(cfg.speed || 8)} km/h`
   if (mode === 'time') return `${n} × ${fmtSec(cfg.sec || 45)}${load}`
+  // Confirmed Rep-Range has no configurable "first target" anymore: its meaningful routine
+  // summary is the complete range. The optional routine keeps the helper backward-compatible
+  // while allowing a caller to resolve an inherited strategy.
+  const confirmed = (cfg.prog || routine?.prog) === 'confirmed_rep_range'
+  const { minReps, maxReps } = confirmedRepRangeBounds(cfg)
+  const reps = confirmed ? `${fmtNum(minReps)}–${fmtNum(maxReps)}` : cfg.reps
   // This is the line with room for it, so the split is spelled out: "3 × 16 · 8/side".
-  const split = isPerSide(cfg) ? ' · ' + t('{0}/side', fmtNum(sideReps(cfg.reps))) : ''
-  return `${n} × ${cfg.reps}${load}${split}`
+  const perSide = confirmed
+    ? `${fmtNum(sideReps(minReps))}–${fmtNum(sideReps(maxReps))}`
+    : fmtNum(sideReps(cfg.reps))
+  const split = isPerSide(cfg) ? ' · ' + t('{0}/side', perSide) : ''
+  return `${n} × ${reps}${load}${split}`
 }
 
 // Drop superset ids that no longer have an adjacent partner (after unlink/reorder/remove).

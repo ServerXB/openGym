@@ -2,6 +2,14 @@
 // Finished workouts retain `target` but not the explanatory live `plan`, so every field that
 // future progression needs must be copied here in one place.
 const PLAN_TARGET_FIELDS = [
+  // These are part of the prescription, not merely of the routine configuration. In
+  // particular `inc` is already resolved by the progression engine when the routine leaves
+  // it at its default. Keeping it here makes the +/- controls of an active workout stable if
+  // the routine (or a default) changes after the workout has started.
+  'sets',
+  'weight',
+  'sec',
+  'inc',
   'restSeconds',
   'restBaseSeconds',
   'restEpochId',
@@ -22,4 +30,23 @@ export function targetForPrescription(config = {}, plan = {}) {
     if (plan[field] != null) target[field] = plan[field]
   }
   return target
+}
+
+// Active workouts created before the increment snapshot existed can still carry an explicit
+// exercise increment in `target`, or the resolved value in their live explanatory `plan`.
+// Keep the old 2.5 step as the final fallback so an in-progress legacy workout remains usable.
+export function loadIncrementForPrescription(entry = {}, fallback = 2.5) {
+  const target = entry.target || {}
+  const hasCanonicalTarget = Object.prototype.hasOwnProperty.call(target, 'inc')
+  // A resolved live plan is safe even when an old target contains an invalid canonical value.
+  // The legacy target field is a fallback only when that target has no canonical property;
+  // otherwise `{ inc: 0, weightIncrement: 5 }` would resurrect stale configuration here while
+  // the progression engine correctly chooses its established default.
+  const candidates = [target.inc, entry.plan?.inc]
+  if (!hasCanonicalTarget) candidates.push(target.weightIncrement)
+  for (const value of candidates) {
+    const n = Number(value)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return fallback
 }

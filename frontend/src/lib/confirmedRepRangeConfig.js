@@ -2,25 +2,25 @@ import {
   CONFIRMED_REST_REDUCTION_MANUAL,
   confirmedRestReductionStrategy
 } from './confirmedRepRangeAutoRest.js'
+import { confirmedRepRangeBounds } from './history.js'
 
 export const CONFIRMED_REP_RANGE_DEFAULTS = {
   minReps: 8,
   maxReps: 12,
-  targetReps: 8,
   restSeconds: 90,
   maxRestSeconds: 240,
-  restReductionStrategy: CONFIRMED_REST_REDUCTION_MANUAL,
-  topRangeStreak: 0
+  restReductionStrategy: CONFIRMED_REST_REDUCTION_MANUAL
 }
 
 // Materialize the strategy configuration instead of letting an exercise's ordinary
 // `reps` value accidentally become both ends of the range.
 export function confirmedRepRangeConfig(cfg = {}, profileRestSeconds = CONFIRMED_REP_RANGE_DEFAULTS.restSeconds) {
-  const minReps = Math.max(1, Math.round(cfg.minReps ?? cfg.repsMin ?? CONFIRMED_REP_RANGE_DEFAULTS.minReps))
-  const maxReps = Math.max(minReps, Math.round(cfg.maxReps ?? cfg.repsMax ?? CONFIRMED_REP_RANGE_DEFAULTS.maxReps))
-  const targetReps = Math.min(maxReps, Math.max(minReps, Math.round(cfg.targetReps ?? minReps)))
+  const { minReps, maxReps } = confirmedRepRangeBounds(cfg)
   const restSeconds = Math.max(0, Math.round(cfg.restSeconds ?? profileRestSeconds ?? CONFIRMED_REP_RANGE_DEFAULTS.restSeconds))
   const maxRestSeconds = Math.max(restSeconds, Math.round(cfg.maxRestSeconds ?? CONFIRMED_REP_RANGE_DEFAULTS.maxRestSeconds))
   const restReductionStrategy = confirmedRestReductionStrategy(cfg.restReductionStrategy)
-  return { minReps, maxReps, targetReps, restSeconds, maxRestSeconds, restReductionStrategy, topRangeStreak: 0 }
+  // `targetReps` intentionally does not belong to routine configuration anymore. The first
+  // Confirmed Rep-Range workout always starts at minReps. A targetReps stored in a workout
+  // snapshot remains the authoritative prescription for that historical session.
+  return { minReps, maxReps, restSeconds, maxRestSeconds, restReductionStrategy }
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { buildSets } from './history.js'
 import { applyPrescription, nextPrescription } from './progression.js'
 import { restSecondsFor } from './workout-timer.js'
 import { targetForPrescription } from './workout-prescription.js'
 import { resetConfirmedRepRangeRest } from './confirmedRepRangeRest.js'
+import { buildPlanBundle, mergePlan, parsePlan } from './plan-share.js'
 
 const ID = 'qa-confirmed-rep-range-lift'
 const cfg = {
@@ -16,6 +18,11 @@ const state = workouts => ({
   unit: 'kg', restSec: 90, exWeights: {}, workouts,
   routines: [{ id: 'routine', prog: 'confirmed_rep_range', ex: [cfg] }]
 })
+
+const fixture = name => JSON.parse(readFileSync(
+  new URL(`../test/fixtures/${name}`, import.meta.url),
+  'utf8'
+))
 
 function buildEntry(S, exercise = cfg) {
   const plan = nextPrescription(S, exercise, S.routines[0])
@@ -37,6 +44,92 @@ function logEntry(S, entry, actualReps) {
 }
 
 describe('Confirmed Rep-Range workout integration', () => {
+  it('loads a complete pre-upgrade backup and ignores its configurable first target', () => {
+    const legacy = fixture('confirmed-rep-range-legacy-no-history.json')
+    const routine = legacy.routines[0]
+    const exercise = routine.ex[0]
+
+    expect(nextPrescription(legacy, exercise, routine)).toMatchObject({
+      kind: 'first', reps: 8, inc: 2, restSeconds: 120
+    })
+    expect(exercise.targetReps).toBe(10)
+  })
+
+  it('keeps an authoritative target from a complete legacy workout backup', () => {
+    const legacy = fixture('confirmed-rep-range-legacy-history-target-10.json')
+    const routine = legacy.routines[0]
+    const exercise = routine.ex[0]
+    const historicalTarget = JSON.stringify(legacy.workouts[0].entries[0].target)
+
+    expect(nextPrescription(legacy, exercise, routine)).toMatchObject({
+      kind: 'up', reps: 11, weight: 70, inc: 2
+    })
+    expect(JSON.stringify(legacy.workouts[0].entries[0].target)).toBe(historicalTarget)
+    expect(legacy.workouts[0].entries[0].target.targetReps).toBe(10)
+  })
+
+  it('keeps an already-active pre-upgrade target immutable while future progression advances', () => {
+    const legacy = fixture('confirmed-rep-range-legacy-history-target-10.json')
+    const historical = legacy.workouts[0].entries[0]
+    legacy.active = {
+      id: 'legacy-active-workout',
+      entries: [{ ...JSON.parse(JSON.stringify(historical)), sets: historical.sets.map(set => ({ ...set, done: false })) }]
+    }
+    const activeBefore = JSON.stringify(legacy.active)
+
+    const future = nextPrescription(legacy, legacy.routines[0].ex[0], legacy.routines[0])
+    expect(future.reps).toBe(11)
+    expect(legacy.active.entries[0].target.targetReps).toBe(10)
+    expect(legacy.active.entries[0].sets.every(set => set.r === 10)).toBe(true)
+    expect(JSON.stringify(legacy.active)).toBe(activeBefore)
+  })
+
+  it('imports a legacy shared plan, then exports only canonical increment configuration', () => {
+    const parsed = parsePlan(fixture('confirmed-rep-range-legacy-plan-target-10.json'))
+    const legacyExercise = parsed.routines[0].ex[0]
+    expect(legacyExercise).toMatchObject({ targetReps: 10, weightIncrement: 2 })
+    expect(legacyExercise).not.toHaveProperty('topRangeStreak')
+    expect(legacyExercise).not.toHaveProperty('restEpochId')
+    expect(legacyExercise).not.toHaveProperty('restSuccessStreak')
+
+    const importedState = { routines: [], week: {}, customEx: [] }
+    mergePlan(importedState, parsed, { schedule: true })
+    expect(importedState.routines[0].ex[0]).toMatchObject({ targetReps: 10, weightIncrement: 2 })
+
+    const exported = buildPlanBundle(importedState)
+    expect(exported.routines[0].ex[0]).toMatchObject({ inc: 2, minReps: 8, maxReps: 12 })
+    expect(exported.routines[0].ex[0]).not.toHaveProperty('targetReps')
+    expect(exported.routines[0].ex[0]).not.toHaveProperty('weightIncrement')
+  })
+
+  it('runs the complete Confirmed cycle when the policy is inherited from the routine', () => {
+    const exercise = { ...cfg }
+    delete exercise.prog
+    let S = {
+      unit: 'kg', restSec: 90, exWeights: {}, workouts: [],
+      routines: [{ id: 'inherited', prog: 'confirmed_rep_range', ex: [exercise] }]
+    }
+
+    for (const expected of [8, 9, 10, 11, 12, 12]) {
+      const plan = nextPrescription(S, exercise, S.routines[0])
+      expect(plan.reps).toBe(expected)
+      const target = targetForPrescription(exercise, plan)
+      const sets = applyPrescription(buildSets(S, exercise), plan)
+        .map(set => ({ ...set, r: expected, done: true }))
+      S = {
+        ...S,
+        workouts: [...S.workouts, {
+          d: `2026-10-${String(S.workouts.length + 1).padStart(2, '0')}`,
+          entries: [{ id: exercise.id, target, sets }]
+        }]
+      }
+    }
+
+    expect(nextPrescription(S, exercise, S.routines[0])).toMatchObject({
+      policy: 'confirmed_rep_range', kind: 'up', weight: 72.5, reps: 8
+    })
+  })
+
   it('overrides rows carried from a previous policy and snapshots the same target', () => {
     const previous = {
       d: '2026-07-31', entries: [{ id: ID, target: { sets: 3, reps: 5, prog: 'linear' },
@@ -44,7 +137,9 @@ describe('Confirmed Rep-Range workout integration', () => {
     }
     const entry = buildEntry(state([previous]))
     expect(entry.plan).toMatchObject({ policy: 'confirmed_rep_range', kind: 'first', reps: 8 })
-    expect(entry.target).toMatchObject({ prog: 'confirmed_rep_range', reps: 8, targetReps: 8, restSeconds: 120 })
+    expect(entry.target).toMatchObject({
+      prog: 'confirmed_rep_range', weight: 60, reps: 8, targetReps: 8, restSeconds: 120
+    })
     expect(entry.sets).toEqual([1, 2, 3].map(() => ({ w: 60, r: 8, done: false })))
   })
 
@@ -57,6 +152,30 @@ describe('Confirmed Rep-Range workout integration', () => {
     expect(next.sets).toEqual([1, 2, 3].map(() => ({ w: 72.5, r: 8, done: false })))
   })
 
+  it('keeps an added bodyweight set in every following workout snapshot', () => {
+    const bodyweight = { ...cfg, weight: 0, bodyweight: true, inc: 2 }
+    let S = state([1, 2].map((n) => ({
+      d: `2026-08-0${n}`,
+      entries: [{
+        id: ID,
+        target: { ...bodyweight, sets: 3, reps: 12, targetReps: 12, prog: 'confirmed_rep_range' },
+        sets: [1, 2, 3].map(() => ({ w: 0, r: 12, done: true }))
+      }]
+    })))
+
+    const fourSetEntry = buildEntry(S, bodyweight)
+    expect(fourSetEntry.plan).toMatchObject({ weight: 0, reps: 8, sets: 4 })
+    expect(fourSetEntry.target).toMatchObject({ targetReps: 8, sets: 4 })
+    expect(fourSetEntry.sets).toHaveLength(4)
+    fourSetEntry.sets.forEach(set => { set.r = 8; set.done = true })
+    S = { ...S, workouts: [...S.workouts, { d: '2026-08-03', entries: [fourSetEntry] }] }
+
+    const following = buildEntry(S, bodyweight)
+    expect(following.plan).toMatchObject({ weight: 0, reps: 9, sets: 4 })
+    expect(following.target).toMatchObject({ targetReps: 9, sets: 4 })
+    expect(following.sets).toEqual([1, 2, 3, 4].map(() => ({ w: 0, r: 9, done: false })))
+  })
+
   it('survives a JSON persistence round-trip without changing the next prescription', () => {
     let S = finish(state([]), 8)
     S = finish(S, 9)
@@ -65,6 +184,19 @@ describe('Confirmed Rep-Range workout integration', () => {
     const after = buildEntry(restored)
     expect(after).toEqual(before)
     expect(after.target).toMatchObject({ targetReps: 10, restSeconds: 120, topRangeStreak: 0 })
+  })
+
+  it('snapshots a resolved default increment and keeps it stable after routine edits', () => {
+    const exercise = { ...cfg }
+    delete exercise.inc
+    const entry = buildEntry(state([]), exercise)
+
+    expect(entry.plan.inc).toBe(2.5)
+    expect(entry.target.inc).toBe(2.5)
+
+    exercise.inc = 5
+    const restoredEntry = JSON.parse(JSON.stringify(entry))
+    expect(restoredEntry.target.inc).toBe(2.5)
   })
 
   it('carries adaptive recovery into the snapshot and timer, including the cap', () => {

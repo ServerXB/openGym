@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { EXDB, EXIDX, BODYPARTS, isCardio, isBodyweightEq, allExercises, equipmentOf } from './lib/exercises.js'
-import { fmtDate, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS } from './lib/format.js'
+import { fmtDate, fmtLoad, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS } from './lib/format.js'
 import { lastEntryFor, bestWeightFor, buildSets, effectiveRoutineId, workoutVolume, setsDone, setsDoneActive, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
 import { beep, vibrate } from './lib/sound.js'
 import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
@@ -18,7 +18,7 @@ import { loadOfWorkouts } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
 import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
-import { nextPrescription, applyPrescription, policyFor, defaultIncrement, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
+import { nextPrescription, applyPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
 import {
   CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
@@ -71,16 +71,18 @@ export function loadStarterPlan() {
 // below an everyday squat.
 const W_LO = 1
 const wHi = unit => (unit === 'lb' ? 660 : 300)
-function WeightInput({ value, setValue, unit }) {
+function WeightInput({ value, setValue, unit, load = false }) {
   const W_HI = wHi(unit)
-  const clamp = x => Math.max(W_LO, Math.min(W_HI, Math.round((x || 0) * 10) / 10))
+  const clamp = x => Math.max(W_LO, Math.min(W_HI, load ? roundLoad(x || 0) : Math.round((x || 0) * 10) / 10))
   const sv = Math.max(W_LO, Math.min(W_HI, value))
   const onSlide = v => setValue(clamp(v))
+  const fineStep = load ? 0.01 : 0.1
+  const format = load ? fmtLoad : fmtNum
   return <>
     <div className="bwstep">
-      <button className="bw-pm" onClick={() => onSlide(value - 0.1)} aria-label="minus 0.1"><Icon name="minus" /></button>
-      <div className="bw-read">{fmtNum(value)}<span className="u"> {unit}</span></div>
-      <button className="bw-pm" onClick={() => onSlide(value + 0.1)} aria-label="plus 0.1"><Icon name="plus" /></button>
+      <button type="button" className="bw-pm" onClick={() => onSlide(value - fineStep)} aria-label={`minus ${fineStep}`}><Icon name="minus" /></button>
+      <div className="bw-read">{format(value)}<span className="u"> {unit}</span></div>
+      <button type="button" className="bw-pm" onClick={() => onSlide(value + fineStep)} aria-label={`plus ${fineStep}`}><Icon name="plus" /></button>
     </div>
     <div className="chips" style={{ justifyContent: 'center', margin: '8px 0' }}>
       <button className="chip" onClick={() => onSlide(value - 1)}>−1</button>
@@ -272,8 +274,8 @@ function OneRM({ ex }) {
   return <>
     <h4 className="sec">{t('Estimated 1RM')}</h4>
     {best && <div className="small" style={{ marginBottom: 8 }}>
-      {t('From your log:')} <b className="accent">{fmtNum(best.est)} {st.unit}</b>
-      <span className="dim"> · {t('{0} × {1} on {2}', fmtNum(best.w) + ' ' + st.unit, best.r, fmtDate(best.d, true))}</span>
+      {t('From your log:')} <b className="accent">{fmtLoad(best.est)} {st.unit}</b>
+      <span className="dim"> · {t('{0} × {1} on {2}', fmtLoad(best.w) + ' ' + st.unit, best.r, fmtDate(best.d, true))}</span>
     </div>}
     <div className="row cfgrow" style={{ marginBottom: 10 }}>
       <Stepper label={t('Weight ({0})', st.unit)} value={w} step={2.5} onChange={setW} />
@@ -281,7 +283,7 @@ function OneRM({ ex }) {
     </div>
     <div className="row between" style={{ marginBottom: 4 }}>
       <span className="muted small">{t('Estimate')}</span>
-      <b className="accent" style={{ fontSize: 20 }}>{est === null ? '—' : fmtNum(est) + ' ' + st.unit}</b>
+      <b className="accent" style={{ fontSize: 20 }}>{est === null ? '—' : fmtLoad(est) + ' ' + st.unit}</b>
     </div>
     <div className="small dim">{est === null
       ? t('Enter a weight and 1–{0} reps — beyond that an estimate is guesswork.', REP_CAP)
@@ -303,7 +305,7 @@ function ExerciseDetail({ ex, close }) {
       {(ex.sm || []).slice(0, 3).map((s, i) => <span key={i} className="tag">{t(s)}</span>)}
     </div>
     {ex.desc && <div className="exnote">{ex.desc}</div>}
-    {best > 0 && <div className="small row" style={{ marginBottom: 6, gap: 5 }}><Icon name="trophy" style={{ fontSize: 14, color: 'var(--yellow)' }} />{t('Best:')} <b className="accent">{fmtNum(best)} {st.unit}</b>{last ? ` · ${t('last')} ${fmtDate(last.d)}: ${last.sets.map(s => setLabel(ex.id, s, last.target)).join(', ')}` : ''}</div>}
+    {best > 0 && <div className="small row" style={{ marginBottom: 6, gap: 5 }}><Icon name="trophy" style={{ fontSize: 14, color: 'var(--yellow)' }} />{t('Best:')} <b className="accent">{fmtLoad(best)} {st.unit}</b>{last ? ` · ${t('last')} ${fmtDate(last.d)}: ${last.sets.map(s => setLabel(ex.id, s, last.target)).join(', ')}` : ''}</div>}
     <Button variant="primary" icon="plus" style={{ margin: '10px 0 4px' }} onClick={() => addToRoutineSheet(ex)}>{t('Add to my plan')}</Button>
     {ex.custom && <div className="row" style={{ gap: 8, marginTop: 8 }}>
       <Button icon="pencil" style={{ flex: 1 }} onClick={() => { close(); customExSheet(ex) }}>{t('Edit')}</Button>
@@ -468,29 +470,99 @@ export const exercisePicker = onPick => ui().openSheet(close => <ExercisePicker 
 // Progression settings for one exercise (issue #17). Shown inside the config sheet because
 // "how does this lift go up" belongs next to sets and reps, not in a separate screen. Left
 // on "follow the routine" it inherits, so most people never touch it.
-function ProgressionFields({ ex, mode, c, setC, existing, routine, unit }) {
+function ConfigGroup({ legend, children, className = '' }) {
+  return <fieldset className={'cfg-group ' + className}>
+    <legend>{legend}</legend>
+    {children}
+  </fieldset>
+}
+
+const addExactLoad = (weight, increment) => Math.round(((+weight || 0) + (+increment || 0)) * 100) / 100
+
+function IncrementPresets({ value, unit, onChange }) {
+  const presets = [2, 2.5, 5]
+  return <div className="cfg-presets" role="group" aria-label={t('Quick increments')}>
+    <span className="cfg-presets-label">{t('Quick increments')}</span>
+    <div className="cfg-preset-buttons">
+      {presets.map(preset => <button type="button" key={preset}
+        className={Math.abs(value - preset) < 0.001 ? 'on' : ''}
+        aria-pressed={Math.abs(value - preset) < 0.001}
+        aria-label={t('Set increment to {0} {1}', fmtLoad(preset), unit)}
+        onClick={() => onChange(preset)}>{fmtLoad(preset)} {unit}</button>)}
+    </div>
+  </div>
+}
+
+function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, perSide, onValidityChange }) {
   const st = useStore(s => s.S)
+  const [incrementError, setIncrementError] = useState(null)
+  const [incrementInputVersion, setIncrementInputVersion] = useState(0)
   const options = POLICIES_FOR[mode] || ['off']
-  if (options.length < 2) return null
   const inherited = policyFor({ id: ex.id }, routine, mode)
   const active = policyFor({ ...c, id: ex.id }, routine, mode)
-  const inc = c.inc > 0 ? c.inc : (mode === 'time' ? 5 : defaultIncrement(ex.id, unit))
+  useEffect(() => {
+    setIncrementError(null)
+    // Linear/Double/Greyskull reuse the same Stepper position. Remount it together with the
+    // validation reset so a rejected raw draft cannot survive a policy switch after its alert
+    // and Save lock have been cleared.
+    setIncrementInputVersion(version => version + 1)
+  }, [active, mode])
+  useEffect(() => onValidityChange?.(!incrementError), [incrementError, onValidityChange])
+  if (options.length < 2) return null
+  const inc = mode === 'time'
+    ? (c.inc > 0 ? c.inc : 5)
+    : loadIncrementFor({ ...c, id: ex.id }, unit)
   const confirmedDefaults = confirmedRepRangeConfig(c, st.restSec)
   // Recovery reset is an immediate action, while the fields in this sheet are only drafts
   // until Save. Always reset to the persisted base, never to an unsaved number in a stepper.
   const persistedConfig = existing || c
   const persistedActive = policyFor({ ...persistedConfig, id: ex.id }, routine, mode)
   const persistedDefaults = confirmedRepRangeConfig(persistedConfig, st.restSec)
-  const confirmedIsPreview = active === 'confirmed_rep_range' && (!existing || persistedActive !== 'confirmed_rep_range')
-  const nextConfirmed = active !== 'confirmed_rep_range'
-    ? null
-    : confirmedIsPreview
-      ? nextPrescription(st, { ...c, ...confirmedDefaults, id: ex.id }, routine)
-      : nextPrescription(st, { ...persistedConfig, ...persistedDefaults, id: ex.id }, routine)
-  const restReason = nextConfirmed?.restWhy
-    ? t(nextConfirmed.restWhy[0], ...nextConfirmed.restWhy.slice(1))
+  const hasSavedConfirmed = !!existing && persistedActive === 'confirmed_rep_range'
+  const savedConfirmed = hasSavedConfirmed
+    ? nextPrescription(st, { ...persistedConfig, ...persistedDefaults, id: ex.id }, routine)
     : null
-  const canResetRest = !confirmedIsPreview && nextConfirmed && nextConfirmed.restSeconds !== persistedDefaults.restSeconds
+  const previewConfirmed = active === 'confirmed_rep_range'
+    ? nextPrescription(st, { ...c, ...confirmedDefaults, id: ex.id }, routine)
+    : null
+  const currentConfirmed = savedConfirmed || previewConfirmed
+  const restReason = currentConfirmed?.restWhy
+    ? t(currentConfirmed.restWhy[0], ...currentConfirmed.restWhy.slice(1))
+    : null
+  const canResetRest = !!savedConfirmed && savedConfirmed.restSeconds !== persistedDefaults.restSeconds
+  const currentRestBase = savedConfirmed ? persistedDefaults.restSeconds : confirmedDefaults.restSeconds
+  const currentRestLimit = savedConfirmed ? persistedDefaults.maxRestSeconds : confirmedDefaults.maxRestSeconds
+  const currentEffectiveRest = currentConfirmed?.restSeconds ?? currentRestBase
+  const effectiveAboveLimit = currentEffectiveRest > currentRestLimit
+  const previewWeight = previewConfirmed?.weight ?? Math.max(0, c.weight || 0)
+  const previewReps = previewConfirmed?.reps ?? confirmedDefaults.minReps
+  const previewSets = Math.max(1, Math.round(previewConfirmed?.sets ?? c.sets) || 3)
+  const nextLoad = previewWeight > 0 ? addExactLoad(previewWeight, inc) : 0
+  const setInc = value => setC(x => ({ ...x, inc: value }))
+  const incrementErrorId = `increment-error-${String(ex.id).replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const setLoadInc = value => {
+    const validation = loadIncrementValidation(value)
+    if (validation) {
+      setIncrementError(validation === 'precision'
+        ? 'Use no more than two decimal places.'
+        : 'Enter an increment of at least 0.01.')
+      return false
+    }
+    const n = Number(value)
+    setIncrementError(null)
+    setInc(Math.round((n + Number.EPSILON) * 100) / 100)
+    return true
+  }
+  const setLoadIncRaw = value => {
+    if (loadIncrementRawValidation(value)) {
+      setIncrementError('Enter a valid increment without a sign or unit.')
+      return false
+    }
+    return true
+  }
+  const chooseLoadInc = value => {
+    if (setLoadInc(value)) setIncrementInputVersion(version => version + 1)
+  }
   const resetRest = () => confirmSheet({
     title: t('Reset recovery to {0}s?', persistedDefaults.restSeconds),
     message: t('Recovery history is shared by exercise, so this reset applies to the exercise in every routine, subject to each configuration\'s maximum. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.'),
@@ -510,49 +582,106 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit }) {
           ...options.map(p => ({ value: p, label: t(POLICY_NAME[p]) }))]} />
     </div>
     <div className="small dim" style={{ marginBottom: active === 'off' ? 18 : 10 }}>{t(POLICY_DESC[active])}</div>
-    {active !== 'off' && <div className="row cfgrow" style={{ marginBottom: 18, flexWrap: 'wrap' }}>
-      <Stepper label={mode === 'time' ? t('Step (seconds)') : t('Step ({0})', unit)} value={inc}
-        step={mode === 'time' ? 5 : 1.25} decimal={mode !== 'time'} onChange={v => setC(x => ({ ...x, inc: v }))} />
-      {active === 'double' && <Stepper label={t('Reps from')} value={c.repsMin || Math.max(1, (c.reps || 10) - 2)}
-        step={1} decimal={false} onChange={v => setC(x => ({ ...x, repsMin: v }))} />}
-      {active === 'confirmed_rep_range' && <>
-        <Stepper label={t('Minimum reps')} value={confirmedDefaults.minReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, minReps: v }))} />
-        <Stepper label={t('Maximum reps')} value={confirmedDefaults.maxReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, maxReps: v }))} />
-        <Stepper label={t('Starting target reps')} value={confirmedDefaults.targetReps} step={1} decimal={false} onChange={v => setC(x => ({ ...x, targetReps: v }))} />
-        <Stepper label={t('Starting rest time (seconds)')} value={confirmedDefaults.restSeconds} step={30} decimal={false} onChange={v => setC(x => ({ ...x, restSeconds: v }))} />
-        <Stepper label={t('Maximum rest time (seconds)')} value={confirmedDefaults.maxRestSeconds} step={30} decimal={false} onChange={v => setC(x => ({ ...x, maxRestSeconds: v }))} />
-      </>}
-    </div>}
-    {active === 'confirmed_rep_range' && <div className="sect-b" style={{ marginBottom: 12 }}>
-      <Row title={t('Automatic recovery reduction')}
-        subtitle={t('After {0} successful workouts prescribed with the same recovery, try {1} seconds less. A failure restarts the count; recovery never goes below the initial value.', CONFIRMED_REST_DECREASE_AFTER_SUCCESSES, CONFIRMED_REST_DECREMENT_SECONDS)}>
-        <Switch checked={confirmedDefaults.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES}
-          onChange={on => setC(x => ({
-            ...x,
-            restReductionStrategy: on
-              ? CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES
-              : CONFIRMED_REST_REDUCTION_MANUAL
-          }))} />
-      </Row>
-    </div>}
-    {nextConfirmed && <div className="small dim" style={{ marginTop: -10, marginBottom: 18 }}>
-      <div>{confirmedIsPreview
-        ? t('Preview after saving: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)
-        : t('Next workout: {0} reps · {1}s recovery.', nextConfirmed.reps, nextConfirmed.restSeconds)}</div>
-      {!confirmedIsPreview && <>
-        <div>{t('Initial recovery: {0}s · Effective recovery: {1}s.', persistedDefaults.restSeconds, nextConfirmed.restSeconds)}</div>
-        {restReason && <div>{t('Why: {0}', restReason)}</div>}
-        {nextConfirmed.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES && nextConfirmed.restSeconds > persistedDefaults.restSeconds &&
-          <div>{t('Successful workouts prescribed with this recovery: {0} / {1}.', nextConfirmed.restSuccessStreak || 0, CONFIRMED_REST_DECREASE_AFTER_SUCCESSES)}</div>}
-        <div style={{ marginTop: 8 }}>
-          <Button size="sm" disabled={!canResetRest} onClick={resetRest}>
+    {active !== 'off' && active !== 'confirmed_rep_range' && <ConfigGroup
+      legend={mode === 'time' ? t('Progression') : t('Load')} className="cfg-progression-group">
+      <div className="cfg-grid">
+        <Stepper key={mode === 'time' ? undefined : incrementInputVersion}
+          label={mode === 'time' ? t('Step (seconds)') : t('Step ({0})', unit)} value={inc}
+          unit={mode === 'time' ? 's' : unit} step={mode === 'time' ? 5 : 0.25}
+          decimal={mode !== 'time'} onChange={mode === 'time' ? setInc : setLoadInc}
+          onRawChange={mode === 'time' ? undefined : setLoadIncRaw}
+          invalid={mode !== 'time' && !!incrementError}
+          describedBy={mode !== 'time' && incrementError ? incrementErrorId : undefined} />
+        {active === 'double' && <Stepper label={t('Reps from')} value={c.repsMin || Math.max(1, (c.reps || 10) - 2)}
+          step={1} decimal={false} onChange={v => setC(x => ({ ...x, repsMin: v }))} />}
+      </div>
+      {mode !== 'time' && <IncrementPresets value={inc} unit={unit} onChange={chooseLoadInc} />}
+      {mode !== 'time' && incrementError && <p id={incrementErrorId} className="cfg-warning" role="alert">{t(incrementError)}</p>}
+    </ConfigGroup>}
+
+    {active === 'confirmed_rep_range' && <div className="cfg-groups">
+      <ConfigGroup legend={t('Sets')}>
+        <div className="cfg-grid one">
+          <Stepper label={t('Sets')} value={c.sets} step={1} decimal={false}
+            onChange={v => setC(x => ({ ...x, sets: v }))} />
+        </div>
+      </ConfigGroup>
+
+      <ConfigGroup legend={t('Load')}>
+        <div className="cfg-grid">
+          <Stepper label={bw ? t('Added ({0})', unit) : t('Weight ({0})', unit)} value={c.weight || 0}
+            unit={unit} step={inc} onChange={v => setC(x => ({ ...x, weight: v }))} />
+          <Stepper key={incrementInputVersion} label={t('Step ({0})', unit)} value={inc} unit={unit} step={0.25}
+            onChange={setLoadInc} onRawChange={setLoadIncRaw} invalid={!!incrementError}
+            describedBy={incrementError ? incrementErrorId : undefined} />
+        </div>
+        <IncrementPresets value={inc} unit={unit} onChange={chooseLoadInc} />
+        <p className="cfg-help">{t('Choose a quick value or enter a custom micro-increment.')}</p>
+        {incrementError && <p id={incrementErrorId} className="cfg-warning" role="alert">{t(incrementError)}</p>}
+        {nextLoad > 0 && <div className="cfg-inline-preview" aria-live="polite">
+          <span>{t('Next load increase')}</span>
+          <strong>{fmtLoad(previewWeight)} → {fmtLoad(nextLoad)} {unit}</strong>
+        </div>}
+        {bw && <p className="cfg-help">{t('For dips or pull-ups with a belt. Progression then follows the weight.')}</p>}
+      </ConfigGroup>
+
+      <ConfigGroup legend={t('Rep range')}>
+        <div className="cfg-grid">
+          <Stepper label={t('Minimum reps')} value={confirmedDefaults.minReps} step={perSide ? 2 : 1}
+            decimal={false} onChange={v => setC(x => ({ ...x, minReps: v }))} />
+          <Stepper label={t('Maximum reps')} value={confirmedDefaults.maxReps} step={perSide ? 2 : 1}
+            decimal={false} onChange={v => setC(x => ({ ...x, maxReps: v }))} />
+        </div>
+        <p className="cfg-help">{t('The first Confirmed session and every session after a load increase start at the minimum: {0} reps.', confirmedDefaults.minReps)}</p>
+      </ConfigGroup>
+
+      <ConfigGroup legend={t('Recovery')}>
+        <div className="cfg-grid">
+          <Stepper label={t('Initial recovery')} value={confirmedDefaults.restSeconds} unit="s" step={30}
+            decimal={false} onChange={v => setC(x => ({ ...x, restSeconds: v }))} />
+          <Stepper label={t('Automatic recovery limit')} value={confirmedDefaults.maxRestSeconds} unit="s" step={30}
+            decimal={false} onChange={v => setC(x => ({ ...x, maxRestSeconds: v }))} />
+        </div>
+
+        <div className="sect-b cfg-recovery-toggle">
+          <Row title={t('Automatic recovery reduction')}
+            subtitle={t('After {0} successful workouts prescribed with the same recovery, try {1} seconds less. A failure restarts the count; recovery never goes below the initial value.', CONFIRMED_REST_DECREASE_AFTER_SUCCESSES, CONFIRMED_REST_DECREMENT_SECONDS)}>
+            <Switch ariaLabel={t('Automatic recovery reduction')}
+              checked={confirmedDefaults.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES}
+              onChange={on => setC(x => ({
+                ...x,
+                restReductionStrategy: on
+                  ? CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES
+                  : CONFIRMED_REST_REDUCTION_MANUAL
+              }))} />
+          </Row>
+        </div>
+
+        <div className="cfg-recovery-status" aria-live="polite">
+          <div className="cfg-status-title">{hasSavedConfirmed ? t('Current saved recovery') : t('Recovery preview')}</div>
+          <dl>
+            <div><dt>{t('Initial recovery')}</dt><dd>{currentRestBase}s</dd></div>
+            <div><dt>{t('Effective recovery next workout')}</dt><dd>{currentEffectiveRest}s</dd></div>
+            <div><dt>{t('Automatic recovery limit')}</dt><dd>{currentRestLimit}s</dd></div>
+          </dl>
+          {effectiveAboveLimit && <p className="cfg-warning">{t('The effective recovery is above the automatic limit. It stays at {0}s until a manual reset or an earned automatic reduction; lowering the limit never shortens it.', currentEffectiveRest)}</p>}
+          {restReason && <p className="cfg-help">{t('Why: {0}', restReason)}</p>}
+          {currentConfirmed?.restReductionStrategy === CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES && currentEffectiveRest > currentRestBase &&
+            <p className="cfg-help">{t('Successful workouts prescribed with this recovery: {0} / {1}.', currentConfirmed.restSuccessStreak || 0, CONFIRMED_REST_DECREASE_AFTER_SUCCESSES)}</p>}
+          {hasSavedConfirmed && <Button size="sm" disabled={!canResetRest} onClick={resetRest}>
             {canResetRest
               ? t('Reset recovery to {0}s', persistedDefaults.restSeconds)
               : t('Recovery is already at the initial value')}
-          </Button>
+          </Button>}
         </div>
-        <div style={{ marginTop: 6 }}>{t('Changing the initial recovery takes effect after Save and does not reset the effective recovery.')}</div>
-      </>}
+        {hasSavedConfirmed && <p className="cfg-help">{t('Changing the initial recovery takes effect after Save and does not reset the effective recovery.')}</p>}
+      </ConfigGroup>
+
+      {previewConfirmed && <section className="cfg-next-preview" aria-live="polite" aria-label={t('Preview after saving')}>
+        <span>{t('Preview after saving')}</span>
+        <strong>{previewSets} × {previewReps}{previewWeight > 0 ? ` @ ${fmtLoad(previewWeight)} ${unit}` : ''}</strong>
+        <span>{t('{0}s recovery', previewConfirmed.restSeconds)}</span>
+      </section>}
     </div>}
   </>
 }
@@ -561,24 +690,37 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   const st = useStore(s => s.S)
   const cardio = isCardio(ex.id)
   const [c, setC] = useState(existing || defaultConfig(ex.id))
+  const [progressionValid, setProgressionValid] = useState(true)
   // Cardio keeps its own duration+speed form; the reps/time choice (issue #16) is offered for
   // everything else, which is where the gap was — planks, hangs, wall sits, loaded carries.
   const mode = cardio ? 'cardio' : modeOf({ ...c, id: ex.id })
   // Both default from the dataset and are then whatever the config says — see isBw.
   const bw = !cardio && isBw({ ...c, id: ex.id })
   const perSide = isPerSide(c)
+  const activePolicy = policyFor({ ...c, id: ex.id }, routine, mode)
+  const confirmed = mode === 'reps' && activePolicy === 'confirmed_rep_range'
+  const effectiveIncrement = loadIncrementFor({ ...c, id: ex.id }, st.unit)
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
   const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
   const save = () => {
+    if (!progressionValid) return
     close()
     const sets = Math.max(1, Math.round(c.sets) || (cardio ? 1 : 3))
     // Only carry progression settings that differ from the inherited default, so a plan file
     // stays readable and "follow the routine" keeps meaning exactly that.
     const prog = {}
     if (c.prog) prog.prog = c.prog
-    if (c.inc > 0) prog.inc = c.inc
-    if (policyFor({ ...c, id: ex.id }, routine, 'reps') === 'confirmed_rep_range') {
-      Object.assign(prog, confirmedRepRangeConfig(c, st.restSec))
+    if ((mode === 'time' && c.inc > 0) || (mode !== 'time' && (c.inc > 0 || c.weightIncrement > 0))) {
+      prog.inc = mode === 'time' ? c.inc : loadIncrementFor({ ...c, id: ex.id }, st.unit)
+    }
+    const confirmedActive = mode === 'reps' && policyFor({ ...c, id: ex.id }, routine, 'reps') === 'confirmed_rep_range'
+    const normalizedConfirmed = confirmedActive ? confirmedRepRangeConfig(c, st.restSec) : null
+    if (normalizedConfirmed) {
+      // `targetReps` in old routine JSON was a configurable starting target. New
+      // configurations always derive it from `minReps`; workout snapshots keep their own
+      // historical target separately.
+      const { targetReps: _legacyTarget, ...confirmedConfig } = normalizedConfirmed
+      Object.assign(prog, confirmedConfig)
     }
     // Written only when it differs from what the dataset already says, so a barbell config
     // stays exactly the shape it was before these flags existed.
@@ -592,6 +734,8 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     else {
       // A unilateral target is stored even: the split has to divide, and a typed 15 would
       // otherwise plan seven reps on one side and eight on the other, every session.
+      // Confirmed derives its live target from minReps, so the ordinary reps value can remain
+      // dormant and reappear unchanged if the user later switches back to another policy.
       const typed = Math.max(1, Math.round(c.reps) || 10)
       const reps = perSide ? Math.ceil(typed / 2) * 2 : typed
       const out = { sets, mode: 'reps', reps, weight: Math.max(0, c.weight || 0), ...flags, ...(perSide ? { side: true } : {}), ...prog }
@@ -613,7 +757,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       <Segmented className="seg-range" value={mode} onChange={setMode}
         options={[{ value: 'reps', label: t('Reps') }, { value: 'time', label: t('Time') }]} />
     </div>}
-    <div className="row cfgrow" style={{ marginBottom: mode === 'time' ? 8 : 18 }}>
+    {!confirmed && <div className="row cfgrow" style={{ marginBottom: mode === 'time' ? 8 : 18 }}>
       {cardio ? <>
         <Stepper label={t('Intervals')} value={c.sets} step={1} decimal={false} onChange={v => setC(x => ({ ...x, sets: v }))} />
         <Stepper label={t('Minutes')} value={c.min} step={1} decimal={false} onChange={v => setC(x => ({ ...x, min: v }))} />
@@ -627,9 +771,9 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
         <Stepper label={t('Reps')} value={c.reps} step={perSide ? 2 : 1} decimal={false} onChange={v => setC(x => ({ ...x, reps: v }))} />
         {/* On bodyweight work the weight stepper is the click #32 is about, so it is not here
             until there is a belt to describe — see the added-weight row below. */}
-        {!bw && <Stepper label={t('Weight ({0})', st.unit)} value={c.weight} step={2.5} onChange={v => setC(x => ({ ...x, weight: v }))} />}
+        {!bw && <Stepper label={t('Weight ({0})', st.unit)} value={c.weight} step={effectiveIncrement} onChange={v => setC(x => ({ ...x, weight: v }))} />}
       </>}
-    </div>
+    </div>}
     {mode === 'time' && !bw && <div className="small dim" style={{ marginBottom: 18 }}>
       {t('A timer runs while you hold the set. Leave the weight at 0 for bodyweight holds.')}
     </div>}
@@ -637,21 +781,31 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     {!cardio && <div className="sect-b" style={{ marginBottom: 8 }}>
       <Row icon="figureStrength" iconTint="var(--acc)" title={t('Bodyweight')}
         subtitle={bw ? t('No weight to enter — just log the reps.') : t('Ask for a weight on every set.')}>
-        <Switch checked={bw} onChange={v => setC(x => ({ ...x, bodyweight: v, weight: v ? 0 : x.weight }))} />
+        <Switch ariaLabel={t('Bodyweight')} checked={bw}
+          onChange={v => setC(x => ({ ...x, bodyweight: v, weight: v ? 0 : x.weight }))} />
       </Row>
       {mode === 'reps' && <Row icon="shuffle" iconTint="var(--blue)" title={t('Reps per side')}
-        subtitle={perSide ? t('You still log the total: {0} is {1} per side.', c.reps || 0, fmtNum(sideReps(c.reps))) : t('For lunges, single-arm rows and the like.')}>
+        subtitle={perSide ? (() => {
+          const shownReps = confirmed ? confirmedRepRangeConfig(c, st.restSec).minReps : (c.reps || 0)
+          return t('You still log the total: {0} is {1} per side.', shownReps, fmtNum(sideReps(shownReps)))
+        })() : t('For lunges, single-arm rows and the like.')}>
         {/* Turning it on rounds the target up to an even number, since half of an odd
             total is a rep one side does not get. */}
-        <Switch checked={perSide} onChange={v => setC(x => ({ ...x, side: v || undefined, reps: v ? Math.ceil((x.reps || 0) / 2) * 2 : x.reps }))} />
+        <Switch ariaLabel={t('Reps per side')} checked={perSide} onChange={v => setC(x => ({
+          ...x,
+          side: v || undefined,
+          reps: v ? Math.ceil((x.reps || 0) / 2) * 2 : x.reps,
+          minReps: v && x.minReps ? Math.ceil(x.minReps / 2) * 2 : x.minReps,
+          maxReps: v && x.maxReps ? Math.ceil(x.maxReps / 2) * 2 : x.maxReps
+        }))} />
       </Row>}
     </div>}
     {/* A stepper is too wide to sit in a list row next to a label — it squeezes the text to
         one word per line — so added weight gets the same full-width treatment as sets and
         reps, with its explanation underneath. */}
-    {bw && <>
+    {bw && !confirmed && <>
       <div className="row cfgrow" style={{ marginBottom: 8 }}>
-        <Stepper label={t('Added ({0})', st.unit)} value={c.weight || 0} step={2.5}
+        <Stepper label={t('Added ({0})', st.unit)} value={c.weight || 0} step={effectiveIncrement}
           onChange={v => setC(x => ({ ...x, weight: v }))} />
       </div>
       <div className="small dim" style={{ marginBottom: 18 }}>
@@ -659,17 +813,18 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       </div>
     </>}
     {/* The rep ceiling only means something when there is no load to add instead. */}
-    {mode === 'reps' && bw && !(c.weight > 0) && <div className="row cfgrow" style={{ marginBottom: 18 }}>
+    {mode === 'reps' && !confirmed && bw && !(c.weight > 0) && <div className="row cfgrow" style={{ marginBottom: 18 }}>
       <Stepper label={t('Top of the range')} value={c.repsMax || 0} step={1} decimal={false}
         onChange={v => setC(x => ({ ...x, repsMax: v }))} />
     </div>}
-    {mode === 'reps' && bw && !(c.weight > 0) && <div className="small dim" style={{ marginTop: -10, marginBottom: 18 }}>
+    {mode === 'reps' && !confirmed && bw && !(c.weight > 0) && <div className="small dim" style={{ marginTop: -10, marginBottom: 18 }}>
       {c.repsMax > 0
         ? t('Reps climb to {0}, then a set is added and the reps start over. At {1} sets it asks you to add weight instead.', c.repsMax, MAX_BW_SETS)
         : t('Reps climb by one whenever every set was clean. Set a ceiling to add sets instead of reps forever.')}
     </div>}
-    <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} existing={existing} routine={routine} unit={st.unit} />
-    <Button variant="primary" onClick={save}>{existing ? t('Save') : t('Add to routine')}</Button>
+    <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} existing={existing} routine={routine}
+      unit={st.unit} bw={bw} perSide={perSide} onValidityChange={setProgressionValid} />
+    <Button variant="primary" disabled={!progressionValid} onClick={save}>{existing ? t('Save') : t('Add to routine')}</Button>
     {ex.custom && <><div style={{ height: 8 }} /><Button icon="pencil" onClick={() => { close(); customExSheet(ex) }}>{t('Edit or delete this exercise')}</Button></>}
     {onDelete && <><div style={{ height: 8 }} /><Button variant="danger" onClick={() => { close(); onDelete() }}>{t('Remove from routine')}</Button></>}
   </>
@@ -941,7 +1096,7 @@ function TopWeight({ entryIdx, close }) {
   if (!entry || !ex) return null
 
   const commit = advance => {
-    const n = Math.round((v || 0) * 10) / 10
+    const n = roundLoad(v || 0)
     if (!isFinite(n) || n < 0) { toast(t('Enter a valid weight')); return }
     update(s => {
       s.active.entries[entryIdx].topW = n
@@ -952,14 +1107,14 @@ function TopWeight({ entryIdx, close }) {
     if (advance && unitDone) {
       if (isLastUnit) workoutCompleteSheet()               // whole workout done → finish/continue prompt
       else update(s => { s.active.cur = units[unitIdx + 1][0] })
-    } else toast(t('Tracked — next time starts at {0}', fmtNum(S().exWeights[entry.id].w) + ' ' + st.unit))
+    } else toast(t('Tracked — next time starts at {0}', fmtLoad(S().exWeights[entry.id].w) + ' ' + st.unit))
   }
   return <>
     <h3 className="capitalize row" style={{ gap: 8 }}><Icon name="checkCircle" style={{ color: 'var(--acc)' }} />{t('{0} done', ex.n)}</h3>
     <div className="muted small">{t('Confirm the weight you worked with — your highest becomes the default next time.')}{!unitDone && unit.length > 1 ? ' ' + t('Then finish the superset partner.') : ''}</div>
-    <WeightInput value={v} setValue={setV} unit={st.unit} />
+    <WeightInput value={v} setValue={setV} unit={st.unit} load />
     <div style={{ height: 10 }} />
-    {prevBest > 0 ? <div className="small dim" style={{ textAlign: 'center', marginBottom: 12 }}>{t('Previous best:')} {fmtNum(prevBest)} {st.unit}{maxSet > prevBest && <span style={{ color: 'var(--yellow)' }}> — {t('new record!')}</span>}</div> : <div style={{ height: 4 }} />}
+    {prevBest > 0 ? <div className="small dim" style={{ textAlign: 'center', marginBottom: 12 }}>{t('Previous best:')} {fmtLoad(prevBest)} {st.unit}{maxSet > prevBest && <span style={{ color: 'var(--yellow)' }}> — {t('new record!')}</span>}</div> : <div style={{ height: 4 }} />}
     {unitDone ? <>
       <Button variant="primary" trailingIcon={isLastUnit ? null : 'chevronRight'} onClick={() => commit(true)}>{isLastUnit ? t('Save') : t('Save & next exercise')}</Button>
       <div style={{ height: 8 }} /><Button variant="ghost" className="dim" onClick={() => commit(false)}>{t('Just close')}</Button>
@@ -994,7 +1149,7 @@ function FinishSummary({ w, prs, e1prs = [], close }) {
     </div>
     {(prs.length > 0 || e1prs.length > 0) && <div style={{ textAlign: 'left', marginBottom: 12 }}>
       {prs.map(id => <div key={id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="trophy" style={{ fontSize: 13 }} />{t('New PR:')} {(EXIDX[id] || {}).n || id}</div>)}
-      {e1prs.map(p => <div key={p.id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="chartLine" style={{ fontSize: 13 }} />{t('Best estimated 1RM:')} {(EXIDX[p.id] || {}).n || p.id} · {fmtNum(p.est)} {st.unit}</div>)}
+      {e1prs.map(p => <div key={p.id} className="small accent capitalize row" style={{ gap: 5 }}><Icon name="chartLine" style={{ fontSize: 13 }} />{t('Best estimated 1RM:')} {(EXIDX[p.id] || {}).n || p.id} · {fmtLoad(p.est)} {st.unit}</div>)}
     </div>}
     <h4 className="sec" style={{ textAlign: 'left' }}>{t('What you just trained')}</h4>
     <BodyMap load={loadOfWorkouts([w])} body={st.body} />

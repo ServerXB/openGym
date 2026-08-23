@@ -83,11 +83,51 @@ export function policyFor(cfg, routine, mode) {
   return allowed.includes(pick) ? pick : 'off'
 }
 
-const round1 = v => Math.round(v * 10) / 10
+// Loads and increments are stored with at most two decimal places. Keeping this rounding at
+// the domain boundary avoids binary floating-point tails (63.75 + 0.25 must serialize as 64)
+// without turning an increment into an absolute loading grid.
+export const roundLoad = v => Math.round((Number(v) + Number.EPSILON) * 100) / 100
+
+const positiveIncrement = value => {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n <= 0) return null
+  const rounded = roundLoad(n)
+  return rounded >= 0.01 ? rounded : null
+}
+
+// Validation for newly typed configuration. Legacy JSON deliberately follows the more lenient
+// resolver above (positive values are rounded for future prescriptions), while new input must
+// receive explicit feedback instead of being silently truncated or replaced by a default.
+export function loadIncrementValidation(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 0.01) return 'minimum'
+  if (Math.abs(n * 100 - Math.round(n * 100)) > 1e-8) return 'precision'
+  return null
+}
+
+export function loadIncrementRawValidation(value) {
+  return /^\d*(?:[.,]\d*)?$/.test(String(value)) ? null : 'format'
+}
+
+// `inc` is the canonical field. `weightIncrement` is accepted only as a read fallback for old
+// JSON; when both are valid, the canonical value wins. Legacy precision beyond hundredths is
+// normalized for future prescriptions, never written back into history.
+export function loadIncrementFor(cfg = {}, unit = 'kg') {
+  // Presence matters: once a canonical field exists, an invalid value must not resurrect a
+  // stale legacy value sitting beside it. The legacy field is consulted only by older JSON
+  // that has no canonical property at all.
+  if (Object.prototype.hasOwnProperty.call(cfg, 'inc')) return positiveIncrement(cfg.inc) ?? defaultIncrement(cfg.id, unit)
+  return positiveIncrement(cfg.weightIncrement) ?? defaultIncrement(cfg.id, unit)
+}
+
+function addLoad(weight, increment, multiples = 1) {
+  return roundLoad(Number(weight) + increment * multiples)
+}
+
 // Snap to a loadable multiple of the step.
 function snap(v, step) {
-  if (!(step > 0)) return round1(v)
-  return round1(Math.round(v / step) * step)
+  if (!(step > 0)) return roundLoad(v)
+  return roundLoad(Math.round(v / step) * step)
 }
 // Back off by DELOAD_FACTOR, landing on something you can actually load. Rounding to the
 // nearest step keeps the cut close to the intended 10 %, but on small weights the nearest
@@ -112,14 +152,18 @@ export function readSession(entry, fallback) {
   const target = (entry && entry.target) || fallback || {}
   const mode = modeOf({ ...target, id: entry && entry.id })
   const sets = (entry && entry.sets) || []
-  const planned = target.sets || sets.length
-  const enough = sets.length >= planned
+  const scoredSets = target.sets || sets.length
+  // Set-count progression needs provenance, not merely the fallback used to score old history:
+  // a modern snapshot's prescribed count wins over optional/missing rows, while a pre-snapshot
+  // workout has only its actual row count and must not be mistaken for today's cfg.sets.
+  const planned = entry?.target?.sets || sets.length
+  const enough = sets.length >= scoredSets
 
   if (mode === 'time') {
     const goal = target.sec || 0
     const held = sets.map(s => (s.done ? (s.sec || 0) : 0))
     return {
-      mode, goal, held,
+      mode, goal, held, planned,
       weight: Math.max(0, ...sets.filter(s => s.done).map(s => s.w || 0)),
       best: Math.max(0, ...held),
       ok: goal > 0 && enough && held.length > 0 && held.every(h => h >= goal)
@@ -128,7 +172,7 @@ export function readSession(entry, fallback) {
   const goal = target.reps || 0
   const reps = sets.map(s => (s.done ? (s.r || 0) : 0))
   return {
-    mode, goal, reps,
+    mode, goal, reps, planned,
     weight: Math.max(0, ...sets.filter(s => s.done).map(s => s.w || 0)),
     count: reps.length,                                   // the dimension bodyweight work grows (#33)
     low: reps.length ? Math.min(...reps) : 0,
@@ -161,9 +205,15 @@ export function stallCount(sessions) {
 // work: they neither rescue a missed prescription nor turn an otherwise clean session into a
 // miss. This also makes the rule stable when a user adds an AMRAP/back-off set.
 export function confirmedRepRangeSession(entry, fallback) {
-  const target = (entry && entry.target) || fallback || {}
+  const snapshot = entry && entry.target
+  const target = snapshot || fallback || {}
   const planned = Math.max(1, target.sets || fallback?.sets || 1)
-  const goal = Math.max(1, target.targetReps || target.reps || fallback?.targetReps || fallback?.reps || 1)
+  // A workout snapshot records what was actually prescribed and is therefore authoritative.
+  // A legacy targetReps on routine configuration is deliberately ignored: without a snapshot,
+  // Confirmed Rep-Range now starts deterministically from minReps.
+  const goal = Math.max(1, snapshot
+    ? (snapshot.targetReps || snapshot.reps || fallback?.minReps || 1)
+    : (fallback?.minReps || 1))
   const prescribed = ((entry && entry.sets) || []).slice(0, planned)
   const hit = s => !!s?.done && (s.r || 0) >= goal
   return {
@@ -307,8 +357,8 @@ function confirmedRepRangeRestPlan(recovery, sessions, normalized, last) {
 /** Pure domain rule for Confirmed Rep-Range. */
 export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const normalized = confirmedRepRangeConfig(cfg, S.restSec)
-  const { minReps, maxReps, targetReps: configuredTarget } = normalized
-  const inc = cfg.weightIncrement > 0 ? cfg.weightIncrement : (cfg.inc > 0 ? cfg.inc : defaultIncrement(cfg.id, unit))
+  const { minReps, maxReps } = normalized
+  const inc = loadIncrementFor(cfg, unit)
   const initialRest = normalized.restSeconds
   const maxRest = normalized.maxRestSeconds
   const sessions = confirmedSessionsFor(S, cfg.id, cfg)
@@ -316,10 +366,32 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg.id), initialRest, maxRest)
   if (!last) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, null)
-    return { policy: 'confirmed_rep_range', kind: 'first', reps: configuredTarget, ...restPlan, topRangeStreak: 0, why: ['Nothing logged yet — this session sets the baseline.'] }
+    // "First Confirmed" means no history for this policy, not necessarily no history for the
+    // exercise. Preserve the most recent operational load from another reps policy so plan,
+    // snapshot and generated sets all describe the same prescription. Time-mode history does
+    // not carry a reps working load and must not leak into this baseline.
+    const previousReps = sessionsFor(S, cfg.id, cfg).filter(session => session.mode === 'reps')
+    const previous = previousReps[previousReps.length - 1]
+    return {
+      policy: 'confirmed_rep_range', kind: 'first', inc,
+      ...(previous ? { weight: previous.weight } : {}),
+      reps: minReps, ...restPlan, topRangeStreak: 0,
+      why: ['Nothing logged yet — this session sets the baseline.']
+    }
   }
 
-  const target = Math.min(maxReps, Math.max(minReps, last.goal || configuredTarget))
+  const target = Math.min(maxReps, Math.max(minReps, last.goal || minReps))
+  // Set-count progression on unloaded work is historical state just like the rep target.
+  // Once a completed Confirmed cycle adds a set, every following prescription must carry it
+  // until another completed cycle adds the next one; falling back to cfg.sets here would make
+  // the added set disappear after a single workout.
+  const configuredSets = Math.max(1, cfg.sets || 1)
+  const bodyweightSets = last.weight <= 0
+    ? Math.max(configuredSets, last.planned || 1)
+    : null
+  const carriedSets = bodyweightSets != null && bodyweightSets > configuredSets
+    ? { sets: bodyweightSets }
+    : {}
   let streak = 0
   for (let i = sessions.length - 1; i >= 0; i--) {
     if (sessions[i].goal !== maxReps || !sessions[i].ok) break
@@ -329,7 +401,7 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     return {
       policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: target,
-      ...restPlan, topRangeStreak: 0,
+      inc, ...carriedSets, ...restPlan, topRangeStreak: 0,
       why: last.firstOk
         ? ['A later set missed the target — weight and target stay unchanged.']
         : ['The first set missed the target — weight and target stay unchanged.']
@@ -337,15 +409,38 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   }
   if (target < maxReps) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, reps: target + 1, ...restPlan, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, target + 1] }
+    const step = repStep(cfg)
+    // Advance to the next valid point on the range. This is normally +1; total-per-side
+    // exercises use +2 so the prescription always splits evenly between the two sides.
+    const nextTarget = Math.min(maxReps, minReps + (Math.floor((target - minReps) / step) + 1) * step)
+    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, inc, reps: nextTarget, ...carriedSets, ...restPlan, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, nextTarget] }
   }
   if (streak < 2) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: maxReps, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
+    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, inc, reps: maxReps, ...carriedSets, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
   }
-  const nextWeight = snap(last.weight + inc, inc)
   const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, reps: minReps, ...restPlan, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
+  // With no external load there is no plate to add. Complete the same two-confirmation cycle,
+  // then progress volume by one set and restart at the bottom of the range. Once the useful
+  // set cap is reached, hold the target and ask for load or a harder variation instead of
+  // inventing a weighted exercise from a bodyweight log.
+  if (last.weight <= 0) {
+    const sets = bodyweightSets + 1
+    if (sets <= MAX_BW_SETS) {
+      return {
+        policy: 'confirmed_rep_range', kind: 'up', weight: 0, inc, reps: minReps, sets,
+        ...restPlan, topRangeStreak: 0,
+        why: ['{0} reps in every set — add a set and go back to {1}.', maxReps, minReps]
+      }
+    }
+    return {
+      policy: 'confirmed_rep_range', kind: 'hold', weight: 0, inc, reps: maxReps, ...carriedSets,
+      ...restPlan, topRangeStreak: 0,
+      why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, maxReps]
+    }
+  }
+  const nextWeight = addLoad(last.weight, inc)
+  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, inc, reps: minReps, ...restPlan, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
 }
 
 /**
@@ -360,13 +455,22 @@ export function nextPrescription(S, cfg, routine) {
   const mode = modeOf(cfg)
   const policy = policyFor(cfg, routine, mode)
   const unit = S.unit || 'kg'
-  const inc = cfg.inc > 0 ? cfg.inc : (mode === 'time' ? DEFAULT_SEC_INCREMENT : defaultIncrement(cfg.id, unit))
-  if (policy === 'off') return { policy, kind: 'off' }
+  const configuredTimeIncrement = Number(cfg.inc)
+  const inc = mode === 'time'
+    ? (Number.isFinite(configuredTimeIncrement) && configuredTimeIncrement > 0 ? configuredTimeIncrement : DEFAULT_SEC_INCREMENT)
+    : loadIncrementFor(cfg, unit)
+  // Even with automatic progression disabled, a reps workout needs the resolved load step for
+  // its manual +/- controls and snapshot. Time/cardio modes have no load increment semantics.
+  if (policy === 'off') return { policy, kind: 'off', ...(mode === 'reps' ? { inc } : {}) }
   if (policy === 'confirmed_rep_range') return confirmedRepRangeProgression(S, cfg, unit)
 
   const sessions = sessionsFor(S, cfg.id, cfg).filter(s => s.mode === mode)
   const last = sessions[sessions.length - 1]
-  if (!last) return { policy, kind: 'first', why: ['Nothing logged yet — this session sets the baseline.'] }
+  if (!last) return {
+    policy, kind: 'first',
+    ...(mode === 'reps' ? { inc } : {}),
+    why: ['Nothing logged yet — this session sets the baseline.']
+  }
 
   const stalls = stallCount(sessions)
   const deloadAt = DELOAD_AFTER[policy] || 3
@@ -391,33 +495,36 @@ export function nextPrescription(S, cfg, routine) {
   // belongs on the normal policies, and a barbell lift logged at 0 has nothing to add to.
   if (w <= 0) {
     const goal = last.goal || cfg.reps || 0
-    if (!last.ok || goal <= 0) return { policy, kind: 'hold', weight: 0, reps: goal || undefined, why: ['Bodyweight — same target again until every set is clean.'] }
+    const configuredSets = Math.max(1, cfg.sets || 1)
+    const bodyweightSets = Math.max(configuredSets, last.planned || last.count || 1)
+    const carriedSets = bodyweightSets > configuredSets ? { sets: bodyweightSets } : {}
+    if (!last.ok || goal <= 0) return { policy, kind: 'hold', weight: 0, inc, reps: goal || undefined, ...carriedSets, why: ['Bodyweight — same target again until every set is clean.'] }
     // A ceiling turns "+1 rep forever" into a plan (issue #33). Past the top of the range the
     // reps go back to the bottom and a set is added instead, which is how bodyweight work
     // actually progresses once a set of 30 push-ups stops being a strength stimulus.
     const top = cfg.repsMax > 0 ? cfg.repsMax : 0
     if (top > 0 && goal >= top) {
-      const sets = Math.max(1, cfg.sets || last.count || 1) + 1
+      const sets = bodyweightSets + 1
       const bottom = Math.max(1, Math.min(cfg.reps || top, top))
-      if (sets <= MAX_BW_SETS) return { policy, kind: 'up', weight: 0, reps: bottom, sets, why: ['{0} reps in every set — add a set and go back to {1}.', goal, bottom] }
+      if (sets <= MAX_BW_SETS) return { policy, kind: 'up', weight: 0, inc, reps: bottom, sets, why: ['{0} reps in every set — add a set and go back to {1}.', goal, bottom] }
       // Out of sets worth adding: more volume is no longer the answer, load or a harder
       // variation is — and that is a decision for a person, not a policy.
-      return { policy, kind: 'hold', weight: 0, reps: goal, why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, goal] }
+      return { policy, kind: 'hold', weight: 0, inc, reps: goal, ...carriedSets, why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, goal] }
     }
     // Unilateral work steps by two, so the total stays even and both sides get the rep.
     const next = goal + repStep(cfg)
-    return { policy, kind: 'up', weight: 0, reps: next, why: ['Bodyweight — every rep last time, so go for {0} this time.', next] }
+    return { policy, kind: 'up', weight: 0, inc, reps: next, ...carriedSets, why: ['Bodyweight — every rep last time, so go for {0} this time.', next] }
   }
   if (policy === 'double') {
     const top = cfg.reps || last.goal || 10
     const bottom = Math.min(cfg.repsMin || Math.max(1, top - 2), top)
-    if (last.ok) return { policy, kind: 'up', weight: snap(w + inc, inc), reps: bottom, why: ['Top of the rep range in every set — {0} {1} more, back to {2} reps.', inc, unit, bottom] }
+    if (last.ok) return { policy, kind: 'up', weight: addLoad(w, inc), inc, reps: bottom, why: ['Top of the rep range in every set — {0} {1} more, back to {2} reps.', inc, unit, bottom] }
     if (stalls >= deloadAt) {
       const dw = deloadTo(w, inc)
-      return { policy, kind: 'deload', weight: dw, reps: bottom, why: ['Stalled {0} sessions — deload to {1} {2}.', stalls, dw, unit] }
+      return { policy, kind: 'deload', weight: dw, inc, reps: bottom, why: ['Stalled {0} sessions — deload to {1} {2}.', stalls, dw, unit] }
     }
     const aim = Math.min(top, Math.max(bottom, last.low + repStep(cfg)))
-    return { policy, kind: 'hold', weight: w, reps: aim, why: ['Same weight — aim for {0} reps this time.', aim] }
+    return { policy, kind: 'hold', weight: w, inc, reps: aim, why: ['Same weight — aim for {0} reps this time.', aim] }
   }
 
   // linear + greyskull
@@ -427,7 +534,7 @@ export function nextPrescription(S, cfg, routine) {
     const dbl = policy === 'greyskull' && last.goal > 0 && last.amrap >= last.goal * 2
     const step = dbl ? inc * 2 : inc
     return {
-      policy, kind: 'up', weight: snap(w + step, inc),
+      policy, kind: 'up', weight: addLoad(w, inc, dbl ? 2 : 1), inc,
       why: dbl
         ? ['Last set hit {0} reps — twice the target, so take a double jump of {1} {2}.', last.amrap, step, unit]
         : ['Every rep last time — {0} {1} more.', step, unit]
@@ -436,13 +543,13 @@ export function nextPrescription(S, cfg, routine) {
   if (stalls >= deloadAt) {
     const dw = deloadTo(w, inc)
     return {
-      policy, kind: 'deload', weight: dw,
+      policy, kind: 'deload', weight: dw, inc,
       why: stalls > 1
         ? ['Missed reps {0} sessions running — reset to {1} {2} and work back up.', stalls, dw, unit]
         : ['Missed reps — reset to {0} {1} and work back up.', dw, unit]
     }
   }
-  return { policy, kind: 'hold', weight: w, why: ['Missed reps last time — same weight again ({0} of {1} to go).', deloadAt - stalls, deloadAt] }
+  return { policy, kind: 'hold', weight: w, inc, why: ['Missed reps last time — same weight again ({0} of {1} to go).', deloadAt - stalls, deloadAt] }
 }
 
 /**

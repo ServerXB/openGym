@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   readSession, sessionsFor, stallCount, nextPrescription, applyPrescription,
   policyFor, defaultIncrement, POLICIES_FOR, DELOAD_AFTER, MAX_BW_SETS,
-  confirmedRepRangeProgression, confirmedRepRangeSession
+  confirmedRepRangeProgression, confirmedRepRangeSession, loadIncrementFor,
+  loadIncrementRawValidation, loadIncrementValidation, roundLoad
 } from './progression.js'
 import { buildSets } from './history.js'
 import { EXDB } from './exercises.js'
@@ -102,6 +103,107 @@ describe('defaultIncrement', () => {
   })
   it('falls back for an unknown exercise', () => {
     expect(defaultIncrement('nope', 'kg')).toBe(2.5)
+  })
+})
+
+describe('configured load increment', () => {
+  it('rounds working loads at the centesimal domain boundary', () => {
+    expect(roundLoad(63.75)).toBe(63.75)
+    expect(roundLoad(63.74999999999999)).toBe(63.75)
+    expect(roundLoad(64)).toBe(64)
+  })
+
+  it.each([
+    [0, 'minimum'], [-1, 'minimum'], [0.001, 'minimum'],
+    [Number.NaN, 'minimum'], [Number.POSITIVE_INFINITY, 'minimum'],
+    [1.234, 'precision'], [0.01, null], [1.25, null], [2, null]
+  ])('validates new increment input %s explicitly', (value, expected) => {
+    expect(loadIncrementValidation(value)).toBe(expected)
+  })
+
+  it.each([
+    ['0,25', null], ['1.25', null], ['0.', null],
+    ['-0,25', 'format'], ['2kg', 'format'], ['1..25', 'format'], ['Infinity', 'format']
+  ])('rejects invalid raw increment input %s before sanitizing it', (value, expected) => {
+    expect(loadIncrementRawValidation(value)).toBe(expected)
+  })
+
+  it.each([
+    [65, 2, 67],
+    [72.5, 2, 74.5],
+    [62.5, 1.25, 63.75],
+    [63.75, 0.25, 64]
+  ])('adds %s + %s as an exact delta, producing %s', (weight, inc, expected) => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, weight, inc, prog: 'linear' }
+    const p = nextPrescription(hist(LIFT, [[weight, 5, 5, 5]]), cfg)
+    expect(p).toMatchObject({ kind: 'up', weight: expected, inc })
+  })
+
+  it('keeps repeated 2 kg increases as exact deltas across the full sequence', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, inc: 2, prog: 'linear' }
+    const S = { unit: 'kg', workouts: [] }
+    let weight = 65
+    for (const expected of [67, 69, 71]) {
+      S.workouts.push({
+        d: `2026-02-${String(S.workouts.length + 1).padStart(2, '0')}`,
+        entries: [{
+          id: LIFT,
+          target: { sets: 3, reps: 5, weight, inc: 2, prog: 'linear' },
+          sets: [1, 2, 3].map(() => ({ w: weight, r: 5, done: true }))
+        }]
+      })
+      const plan = nextPrescription(S, cfg)
+      expect(plan).toMatchObject({ kind: 'up', weight: expected, inc: 2 })
+      weight = plan.weight
+    }
+  })
+
+  it('uses canonical inc before the legacy weightIncrement field', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, inc: 2, weightIncrement: 5, prog: 'linear' }
+    expect(loadIncrementFor(cfg)).toBe(2)
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 5]]), cfg)).toMatchObject({ weight: 67, inc: 2 })
+  })
+
+  it('uses the default rather than a stale legacy value when canonical inc is present but invalid', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, inc: 0, weightIncrement: 5, prog: 'linear' }
+    expect(loadIncrementFor(cfg)).toBe(2.5)
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 5]]), cfg)).toMatchObject({ weight: 67.5, inc: 2.5 })
+  })
+
+  it('reads weightIncrement only as a legacy fallback', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, weightIncrement: 2, prog: 'linear' }
+    expect(loadIncrementFor(cfg)).toBe(2)
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 5]]), cfg)).toMatchObject({ weight: 67, inc: 2 })
+  })
+
+  it('normalizes legacy precision to hundredths for future prescriptions', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, inc: 1.234, prog: 'linear' }
+    expect(loadIncrementFor(cfg)).toBe(1.23)
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 5]]), cfg)).toMatchObject({ weight: 66.23, inc: 1.23 })
+  })
+
+  it('normalizes a future increment without rewriting a legacy workout snapshot', () => {
+    const cfg = { id: LIFT, sets: 3, reps: 5, inc: 1.234, prog: 'linear' }
+    const S = hist(LIFT, [[65, 5, 5, 5]], {
+      sets: 3, reps: 5, weight: 65, inc: 1.234, prog: 'linear'
+    })
+    const before = JSON.stringify(S.workouts)
+
+    expect(nextPrescription(S, cfg)).toMatchObject({ weight: 66.23, inc: 1.23 })
+    expect(JSON.stringify(S.workouts)).toBe(before)
+    expect(S.workouts[0].entries[0].target.inc).toBe(1.234)
+  })
+
+  it('falls back to the established exercise default for invalid increments', () => {
+    expect(loadIncrementFor({ id: LIFT, inc: 0, weightIncrement: -2 }, 'kg')).toBe(2.5)
+    expect(loadIncrementFor({ id: LIFT, inc: Number.POSITIVE_INFINITY }, 'kg')).toBe(2.5)
+  })
+
+  it('exposes the resolved default in a first prescription for snapshotting', () => {
+    expect(nextPrescription({ unit: 'kg', workouts: [] }, { id: LIFT, prog: 'linear' })).toMatchObject({
+      kind: 'first',
+      inc: 2.5
+    })
   })
 })
 
@@ -208,6 +310,40 @@ describe('bodyweight exercises', () => {
     expect(p.weight).toBe(0)
   })
 
+  it('carries an added bodyweight set into later rep prescriptions', () => {
+    const S = hist(LIFT, [[0, 10, 10, 10, 10]], { sets: 4, reps: 10 })
+    const p = nextPrescription(S, { ...cfg, sets: 3, reps: 10, repsMax: 15 })
+    expect(p).toMatchObject({ kind: 'up', weight: 0, reps: 11, sets: 4 })
+  })
+
+  it('does not turn an optional extra bodyweight set into a permanent prescription', () => {
+    const S = hist(LIFT, [[0, 10, 10, 10, 10]], { sets: 3, reps: 10 })
+    const p = nextPrescription(S, { ...cfg, sets: 3, reps: 10, repsMax: 15 })
+    expect(p).toMatchObject({ kind: 'up', weight: 0, reps: 11 })
+    expect(p.sets).toBeUndefined()
+  })
+
+  it('carries the prescribed bodyweight set count even when one row is missing', () => {
+    const S = hist(LIFT, [[0, 10, 10, 10]], { sets: 4, reps: 10 })
+    const p = nextPrescription(S, { ...cfg, sets: 3, reps: 10, repsMax: 15 })
+    expect(p).toMatchObject({ kind: 'hold', weight: 0, reps: 10, sets: 4 })
+  })
+
+  it('uses row count for set carry in a pre-snapshot bodyweight workout', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2025-12-01',
+        entries: [{
+          id: LIFT,
+          sets: [1, 2, 3, 4].map(() => ({ w: 0, r: 10, done: true }))
+        }]
+      }]
+    }
+    const p = nextPrescription(S, { ...cfg, sets: 3, reps: 10, repsMax: 15 })
+    expect(p).toMatchObject({ kind: 'up', weight: 0, reps: 11, sets: 4 })
+  })
+
   it('stops adding sets at the cap and says what to do instead', () => {
     const at15 = hist(LIFT, [[0, 15, 15, 15]], { sets: 3, reps: 15 })
     const p = nextPrescription(at15, { ...cfg, sets: MAX_BW_SETS, reps: 10, repsMax: 15 })
@@ -257,6 +393,12 @@ describe('bodyweight exercises', () => {
 describe('Greyskull LP', () => {
   const cfg = { id: LIFT, sets: 3, reps: 5, weight: 60, prog: 'greyskull' }
 
+  it('uses exact normal and double deltas from an off-grid load', () => {
+    const exact = { ...cfg, inc: 2 }
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 5]]), exact)).toMatchObject({ weight: 67, inc: 2 })
+    expect(nextPrescription(hist(LIFT, [[65, 5, 5, 10]]), exact)).toMatchObject({ weight: 69, inc: 2 })
+  })
+
   it('advances when the final set makes the target', () => {
     const p = nextPrescription(hist(LIFT, [[60, 5, 5, 5]]), cfg)
     expect(p.kind).toBe('up')
@@ -286,6 +428,15 @@ describe('Greyskull LP', () => {
 
 describe('double progression', () => {
   const cfg = { id: LIFT, sets: 3, reps: 12, repsMin: 8, weight: 40, prog: 'double' }
+
+  it('adds the configured increment as an exact delta from an off-grid load', () => {
+    const exact = { ...cfg, inc: 2 }
+    expect(nextPrescription(hist(LIFT, [[65, 12, 12, 12]], { sets: 3, reps: 12 }), exact)).toMatchObject({
+      weight: 67,
+      reps: 8,
+      inc: 2
+    })
+  })
 
   it('adds weight and drops back to the bottom of the range at the top of it', () => {
     const p = nextPrescription(hist(LIFT, [[40, 12, 12, 12]], { sets: 3, reps: 12 }), cfg)
@@ -329,6 +480,21 @@ describe('Confirmed Rep-Range progression', () => {
     }))
   })
 
+  it('always starts at the minimum and ignores a legacy configured starting target', () => {
+    const first = confirmedRepRangeProgression({ unit: 'kg', restSec: 90, workouts: [] }, { ...cfg, targetReps: 10, inc: 2 })
+    expect(first).toMatchObject({ kind: 'first', reps: 8, inc: 2 })
+    expect(first.weight).toBeUndefined()
+  })
+
+  it('uses the configured weight when the exercise has no workout history', () => {
+    const S = { unit: 'kg', restSec: 90, exWeights: {}, workouts: [] }
+    const prescription = nextPrescription(S, cfg)
+    const sets = applyPrescription(buildSets(S, cfg), prescription)
+
+    expect(prescription.weight).toBeUndefined()
+    expect(sets).toEqual(Array.from({ length: 3 }, () => ({ w: 70, r: 8, done: false })))
+  })
+
   it.each([[8, 9], [9, 10], [10, 11], [11, 12]])('advances a successful target from %i to %i', (from, to) => {
     expect(confirmedRepRangeProgression(state([{ target: from, reps: [from, from, from] }]), cfg).reps).toBe(to)
   })
@@ -344,6 +510,26 @@ describe('Confirmed Rep-Range progression', () => {
       { target: 12, reps: [12, 12, 12], streak: 1 }
     ]), cfg)
     expect(p).toMatchObject({ weight: 72.5, reps: 8, topRangeStreak: 0 })
+  })
+
+  it.each([
+    [65, 2, 67],
+    [72.5, 2, 74.5],
+    [62.5, 1.25, 63.75]
+  ])('applies the exact load delta after the second top confirmation (%s + %s = %s)', (weight, inc, expected) => {
+    const p = confirmedRepRangeProgression(state([
+      { target: 12, reps: [12, 12, 12], weight },
+      { target: 12, reps: [12, 12, 12], weight }
+    ]), { ...cfg, inc })
+    expect(p).toMatchObject({ weight: expected, reps: 8, inc, topRangeStreak: 0 })
+  })
+
+  it('prefers canonical inc to legacy weightIncrement', () => {
+    const p = confirmedRepRangeProgression(state([
+      { target: 12, reps: [12, 12, 12], weight: 65 },
+      { target: 12, reps: [12, 12, 12], weight: 65 }
+    ]), { ...cfg, inc: 2, weightIncrement: 5 })
+    expect(p).toMatchObject({ weight: 67, inc: 2 })
   })
 
   it('resets a top-range streak when the next session misses', () => {
@@ -370,6 +556,114 @@ describe('Confirmed Rep-Range progression', () => {
   it('accepts reps above target and requires every prescribed set to be complete', () => {
     expect(confirmedRepRangeSession(state([{ target: 10, reps: [12, 11, 10] }]).workouts[0].entries[0], cfg).ok).toBe(true)
     expect(confirmedRepRangeSession(state([{ target: 10, reps: [10, 10, null] }]).workouts[0].entries[0], cfg).ok).toBe(false)
+  })
+
+  it('does not let extra completed reps skip an intermediate target', () => {
+    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [12, 12, 12] }]), cfg).reps).toBe(9)
+  })
+
+  it('uses the historical snapshot target even when routine targetReps disagrees', () => {
+    const S = state([{ target: 10, reps: [10, 10, 10] }])
+    const session = confirmedRepRangeSession(S.workouts[0].entries[0], { ...cfg, targetReps: 8 })
+    expect(session).toMatchObject({ goal: 10, ok: true })
+    expect(confirmedRepRangeProgression(S, { ...cfg, targetReps: 8 }).reps).toBe(11)
+  })
+
+  it('preserves the existing no-baseline behavior after a structural range edit', () => {
+    const S = state([{ target: 8, reps: [8, 8, 8] }])
+    const historyBefore = JSON.stringify(S.workouts)
+    const controlsBefore = JSON.stringify(S.progressionControls)
+
+    // A future explicit baseline feature is intentionally out of scope. Until then the old
+    // successful snapshot is clamped by the existing engine and advances normally; editing
+    // the range must not silently create a marker or rewrite that snapshot.
+    expect(confirmedRepRangeProgression(S, { ...cfg, minReps: 10, maxReps: 15 })).toMatchObject({
+      kind: 'up', reps: 11, weight: 70
+    })
+    expect(JSON.stringify(S.workouts)).toBe(historyBefore)
+    expect(JSON.stringify(S.progressionControls)).toBe(controlsBefore)
+  })
+
+  it('does not create a rep baseline when only increment or recovery configuration changes', () => {
+    const S = state([{ target: 10, reps: [10, 10, 10], rest: 120 }])
+    const historyBefore = JSON.stringify(S.workouts)
+    const changed = { ...cfg, inc: 2, restSeconds: 90, maxRestSeconds: 180 }
+
+    expect(confirmedRepRangeProgression(S, changed)).toMatchObject({
+      kind: 'up', reps: 11, weight: 70, inc: 2, restSeconds: 120
+    })
+    expect(JSON.stringify(S.workouts)).toBe(historyBefore)
+  })
+
+  it('holds the historical snapshot target after a failure', () => {
+    const p = confirmedRepRangeProgression(state([{ target: 10, reps: [10, 9, 9] }]), { ...cfg, targetReps: 8 })
+    expect(p).toMatchObject({ kind: 'hold', reps: 10, weight: 70 })
+  })
+
+  it('advances total-per-side targets by two through the range', () => {
+    const sideCfg = { ...cfg, side: true, minReps: 16, maxReps: 20, targetReps: 19 }
+    expect(confirmedRepRangeProgression(state([{ target: 16, reps: [16, 16, 16] }]), sideCfg).reps).toBe(18)
+    expect(confirmedRepRangeProgression(state([{ target: 18, reps: [18, 18, 18] }]), sideCfg).reps).toBe(20)
+  })
+
+  it('supports a fixed range with two confirmations before increasing load', () => {
+    const fixed = { ...cfg, minReps: 8, maxReps: 8, targetReps: 12, inc: 2 }
+    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [8, 8, 8] }]), fixed)).toMatchObject({
+      kind: 'hold', weight: 70, reps: 8, topRangeStreak: 1
+    })
+    expect(confirmedRepRangeProgression(state([
+      { target: 8, reps: [8, 8, 8] },
+      { target: 8, reps: [8, 8, 8] }
+    ]), fixed)).toMatchObject({ kind: 'up', weight: 72, reps: 8, topRangeStreak: 0 })
+  })
+
+  it('adds a set instead of inventing load after two bodyweight top confirmations', () => {
+    const bodyweight = { ...cfg, bodyweight: true, weight: 0, inc: 2 }
+    const p = confirmedRepRangeProgression(state([
+      { target: 12, reps: [12, 12, 12], weight: 0 },
+      { target: 12, reps: [12, 12, 12], weight: 0 }
+    ]), bodyweight)
+
+    expect(p).toMatchObject({ kind: 'up', weight: 0, reps: 8, sets: 4, topRangeStreak: 0 })
+    expect(p.why[0]).toMatch(/add a set/)
+  })
+
+  it('keeps the added Confirmed bodyweight set throughout the following range', () => {
+    const bodyweight = { ...cfg, bodyweight: true, weight: 0, inc: 2 }
+    const S = state([
+      { target: 12, reps: [12, 12, 12], weight: 0 },
+      { target: 12, reps: [12, 12, 12], weight: 0 },
+      { target: 8, reps: [8, 8, 8, 8], weight: 0 }
+    ])
+    S.workouts[2].entries[0].target.sets = 4
+
+    expect(confirmedRepRangeProgression(S, bodyweight)).toMatchObject({
+      kind: 'up', weight: 0, reps: 9, sets: 4
+    })
+  })
+
+  it('holds bodyweight work at six sets and recommends load or a harder variation', () => {
+    const bodyweight = { ...cfg, sets: MAX_BW_SETS, bodyweight: true, weight: 0, inc: 2 }
+    const S = state([
+      { target: 12, reps: Array(MAX_BW_SETS).fill(12), weight: 0 },
+      { target: 12, reps: Array(MAX_BW_SETS).fill(12), weight: 0 }
+    ])
+    S.workouts.forEach(workout => { workout.entries[0].target.sets = MAX_BW_SETS })
+
+    const p = confirmedRepRangeProgression(S, bodyweight)
+    expect(p).toMatchObject({ kind: 'hold', weight: 0, reps: 12, topRangeStreak: 0 })
+    expect(p.sets).toBeUndefined()
+    expect(p.why[0]).toMatch(/harder variation/)
+  })
+
+  it('keeps an odd legacy per-side target after failure and moves to the next even target after success', () => {
+    const sideCfg = { ...cfg, side: true, minReps: 16, maxReps: 20 }
+    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 16, 17] }]), sideCfg)).toMatchObject({
+      kind: 'hold', reps: 17
+    })
+    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 17, 17] }]), sideCfg)).toMatchObject({
+      kind: 'up', reps: 18
+    })
   })
 
   it('ignores extra sets but never lets them rescue a missed prescribed set', () => {
@@ -411,8 +705,27 @@ describe('Confirmed Rep-Range progression', () => {
     const prescription = nextPrescription(S, cfg)
     const sets = applyPrescription(buildSets(S, cfg), prescription)
 
-    expect(prescription).toMatchObject({ policy: 'confirmed_rep_range', kind: 'first', reps: 8 })
+    expect(prescription).toMatchObject({ policy: 'confirmed_rep_range', kind: 'first', weight: 60, reps: 8 })
     expect(sets).toEqual(Array.from({ length: 3 }, () => ({ w: 60, r: 8, done: false })))
+  })
+
+  it('does not treat a previous timed load as the working weight for first Confirmed reps', () => {
+    const S = {
+      unit: 'kg', restSec: 90, exWeights: {},
+      workouts: [{
+        d: '2026-08-01',
+        entries: [{
+          id: LIFT,
+          target: { id: LIFT, sets: 3, mode: 'time', sec: 45, weight: 25, prog: 'time' },
+          sets: Array.from({ length: 3 }, () => ({ w: 25, sec: 45, done: true }))
+        }]
+      }]
+    }
+
+    const prescription = nextPrescription(S, cfg)
+    const sets = applyPrescription(buildSets(S, cfg), prescription)
+    expect(prescription.weight).toBeUndefined()
+    expect(sets).toEqual(Array.from({ length: 3 }, () => ({ w: 70, r: 8, done: false })))
   })
 })
 
@@ -432,6 +745,11 @@ describe('timed progression', () => {
     expect(p.kind).toBe('up')
     expect(p.sec).toBe(50)
     expect(p.weight).toBeUndefined()
+  })
+
+  it('honours a custom time increment', () => {
+    const p = nextPrescription(timeHist([[45, 45]]), { ...cfg, inc: 15 })
+    expect(p).toMatchObject({ kind: 'up', sec: 60 })
   })
 
   it('repeats the target when a hold came up short', () => {
@@ -454,10 +772,11 @@ describe('timed progression', () => {
 })
 
 describe('policy "off"', () => {
-  it('has no opinion at all', () => {
-    const p = nextPrescription(hist(LIFT, [[60, 5, 5, 5]]), { id: LIFT, sets: 3, reps: 5, prog: 'off' })
+  it('has no automatic target but exposes the manual load step', () => {
+    const p = nextPrescription(hist(LIFT, [[60, 5, 5, 5]]), { id: LIFT, sets: 3, reps: 5, inc: 2, prog: 'off' })
     expect(p.kind).toBe('off')
     expect(p.weight).toBeUndefined()
+    expect(p.inc).toBe(2)
   })
   it('is what cardio always gets', () => {
     expect(nextPrescription({ unit: 'kg', workouts: [] }, { id: CARDIO, sets: 1, min: 20 }).kind).toBe('off')

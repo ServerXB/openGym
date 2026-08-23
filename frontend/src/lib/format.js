@@ -23,8 +23,16 @@ export function fmtDur(ms) {
 // Imported history has no clock — an unknown duration is left out rather than shown as "0 min".
 export const durPart = ms => (ms >= 60000 ? [fmtDur(ms)] : [])
 // Numbers follow the UI language, like the dates above — a hardcoded locale put Swiss
-// apostrophes ("7'535 kg") in front of every user, in every language.
-export const fmtNum = n => (Math.round(n * 10) / 10).toLocaleString(dateLocale())
+// apostrophes ("7'535 kg") in front of every user, in every language. General measurements keep
+// the app's established one-decimal display; configured loads have their own centesimal policy.
+export const fmtNum = n =>
+  (Math.round((Number(n) + Number.EPSILON) * 10) / 10)
+    .toLocaleString(dateLocale(), { maximumFractionDigits: 1 })
+// Micro-loads need hundredths (63.75) while integers and halves stay compact (64, 62.5).
+// Keeping this separate avoids changing speed, effort, body-weight and other generic numbers.
+export const fmtLoad = n =>
+  (Math.round((Number(n) + Number.EPSILON) * 100) / 100)
+    .toLocaleString(dateLocale(), { maximumFractionDigits: 2 })
 // Volume stays in the profile's unit throughout: the old shorthand turned anything over
 // 10 000 into "t", which is wrong for a pound profile and made one list mix "18.8t" with
 // "7'535 kg" — two numbers you can't compare at a glance.

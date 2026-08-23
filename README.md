@@ -182,21 +182,23 @@ The rest, in no particular order:
 ## Confirmed Rep-Range progression
 
 This per-exercise rule advances only from completed, prescribed sets; RIR/RPE stays recorded
-but never affects the decision. Configure minimum/maximum reps, current target, load increment,
-current recovery and maximum recovery. One clean session adds one rep until the top. At the top,
-two consecutive clean sessions are required before load increases and the target returns to the
-minimum. A first-set miss holds everything. If the first set succeeds but a later prescribed set
-misses, recovery increases by 30 seconds up to its cap. There is no automatic deload. Optional
-extra sets are ignored.
+but never affects the decision. Configure minimum/maximum reps, load increment, initial recovery
+and maximum recovery. The first session starts at the minimum; one clean session then adds one rep
+until the top. At the top, two consecutive clean sessions are required before the load increases
+by the configured delta and the target returns to the minimum. A first-set miss holds everything.
+If the first set succeeds but a later prescribed set misses, recovery increases by 30 seconds up
+to its cap. An explicit reset can return future workouts to the configured initial recovery, and
+the optional automatic strategy removes 30 seconds after four consecutive successful exposures,
+never below that initial value. There is no automatic deload. Optional extra sets are ignored.
 
 ```text
-Bench Press — 3 sets, 8–12 reps, 70 kg, +2.5 kg, rest 120–240 s
+Bench Press — 3 sets, 8–12 reps, 70 kg, +2 kg, rest 120–240 s
 8/8/8 → target 9
 9/9/9 → target 10
 10/10/10 → target 11
 11/11/11 → target 12
 12/12/12 → top-range confirmation 1/2
-12/12/12 → 72.5 kg, target 8, confirmation 0/2
+12/12/12 → 72 kg, target 8, confirmation 0/2
 ```
 
 ```text
@@ -204,9 +206,12 @@ Target 10, rest 120 s
 10/9/8 → target and weight unchanged, rest 150 s
 ```
 
-The effective target, recovery and confirmation count are snapshotted into each workout entry.
-Old routine/workout JSON remains valid: absent fields use the exercise target, profile rest timer
-and normal per-exercise weight increment as defaults.
+The effective target, load increment, recovery and confirmation count are snapshotted into each
+workout entry, so an active or completed workout never changes retroactively. Old routine/workout
+JSON remains valid: a legacy configurable `targetReps` is accepted but no longer chooses the first
+target, while a `targetReps` inside a workout snapshot remains authoritative historical data.
+Absent configuration fields use the minimum reps, profile rest timer and normal per-exercise load
+increment as defaults.
 
 ## Tech
 

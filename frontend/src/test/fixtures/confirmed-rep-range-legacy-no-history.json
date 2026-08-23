@@ -1,0 +1,43 @@
+{
+  "unit": "kg",
+  "restSec": 90,
+  "sound": true,
+  "keepAwake": true,
+  "lang": "en",
+  "theme": "dark",
+  "accent": "lime",
+  "body": "male",
+  "targetW": null,
+  "bodyweight": [],
+  "routines": [
+    {
+      "id": "legacy-routine-no-history",
+      "name": "Legacy Confirmed",
+      "prog": "confirmed_rep_range",
+      "ex": [
+        {
+          "id": "legacy-confirmed-lift",
+          "sets": 3,
+          "reps": 10,
+          "weight": 70,
+          "minReps": 8,
+          "maxReps": 12,
+          "targetReps": 10,
+          "weightIncrement": 2,
+          "restSeconds": 120,
+          "maxRestSeconds": 240
+        }
+      ]
+    }
+  ],
+  "week": {},
+  "dayPlan": {},
+  "exWeights": {},
+  "workouts": [],
+  "active": null,
+  "customEx": [],
+  "gifSize": "full",
+  "progressionControls": {},
+  "reminder": { "on": false, "time": "08:00", "tz": null },
+  "effort": null
+}

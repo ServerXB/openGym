@@ -1,0 +1,37 @@
+{
+  "opengym_plan": 1,
+  "exported": "2026-07-20",
+  "name": "Legacy Confirmed plan",
+  "week": { "1": "legacy-plan-routine" },
+  "routines": [
+    {
+      "id": "legacy-plan-routine",
+      "name": "Legacy Confirmed",
+      "prog": "confirmed_rep_range",
+      "ex": [
+        {
+          "id": "legacy-custom-lift",
+          "sets": 3,
+          "reps": 10,
+          "weight": 70,
+          "minReps": 8,
+          "maxReps": 12,
+          "targetReps": 10,
+          "topRangeStreak": 1,
+          "restEpochId": "private-legacy-epoch",
+          "restSuccessStreak": 3,
+          "weightIncrement": 2,
+          "restSeconds": 120,
+          "maxRestSeconds": 240
+        }
+      ]
+    }
+  ],
+  "customEx": [
+    {
+      "id": "legacy-custom-lift",
+      "n": "Legacy Test Press",
+      "bp": "chest"
+    }
+  ]
+}

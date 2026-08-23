@@ -7,7 +7,8 @@
 - Branch: `feature/confirmed-rep-range-progression`
 - Base revision for this recovery iteration: `c0f7c59`
 - Tester role: independent implementation review and regression testing
-- Overall result: **Code acceptance passed; Docker and real-browser interaction tests remain outstanding**
+- Overall result: **Code and Chromium responsive acceptance passed; Docker/CasaOS, authenticated
+  cross-device sync and assistive-device gates remain outstanding**
 
 The initial integration review found one high-severity defect and two medium-severity
 configuration/UI problems. The recovery iteration then added a manual reset and an opt-in
@@ -20,7 +21,7 @@ findings are now covered by automated regression tests.
 - Frontend: React 19, Vite 8, Vitest 4
 - Local Node runtime: Node.js 26.3.0
 - Docker: unavailable in the test environment
-- Browser end-to-end runner: unavailable
+- Browser: local Chromium 151 headless through DevTools protocol; no permanent project E2E runner
 
 ## Baseline before implementation
 
@@ -1141,3 +1142,288 @@ After the fixes, rerun:
 4. Docker Compose build and startup;
 5. API health and frontend HTTP smoke tests;
 6. a manual six-session Confirmed Rep-Range workflow.
+
+## Iterazione incremento, target minimo e UX responsive — 2026-08-23
+
+### Identificazione dell’esecuzione
+
+- Branch: `feature/confirmed-rep-range-progression`
+- Base del working tree: `49bdd99`
+- Stato testato: modifiche locali non ancora committate sopra `49bdd99`
+- Baseline prima di questa iterazione: **16 file / 265 test Pass**
+- Esito finale: **18 file / 344 test Pass**
+- Docker/CasaOS: **Blocked per ambiente**, perché il comando `docker` non è installato
+- Browser reale headless: **Pass** con Chromium 151
+
+Questa sezione è aggiuntiva: non sostituisce né altera la baseline da 265 test registrata sopra.
+
+### Comportamento implementato e verificato
+
+- Il preset da 2 kg/lb è disponibile e ogni strategia applica l’incremento come delta esatto,
+  anche da un carico non allineato: 65 → 67, 72,5 → 74,5 e 62,5 → 63,75.
+- I nuovi incrementi accettano al massimo due decimali e un minimo di 0,01; valori nuovi non
+  validi mostrano un errore esplicito, conservano il draft durante la digitazione e disabilitano
+  Salva finché il valore non torna valido.
+- La prima sessione Confirmed e ogni sessione successiva a un aumento del carico partono da
+  `minReps`.
+- `Target prima sessione` non è più configurabile; `Ripetizioni` generiche resta dormiente e
+  nascosto durante Confirmed, così può ricomparire invariato passando a un’altra strategia.
+- I nuovi export omettono il `targetReps` di configurazione. Gli snapshot storici e i workout già
+  attivi continuano invece a usare il proprio target effettivamente prescritto.
+- Lo snapshot acquisisce set, carico, durata e incremento effettivo. I pulsanti del carico usano
+  prima lo snapshot e non cambiano se la routine viene modificata dopo l’avvio.
+- Configurazione e riepilogo supportano policy diretta o ereditata dalla routine.
+- Il layout usa gruppi semantici Serie, Carico, Range di ripetizioni e Recupero, al massimo due
+  colonne e una colonna sotto 360 px; le label non usano ellissi e i controlli misurano almeno
+  44 × 44 px.
+- I carichi usano un formatter dedicato con due decimali; il formatter generale di velocità,
+  effort e peso corporeo mantiene la precisione precedente.
+- Gli esercizi a corpo libero non ricevono carichi inventati e conservano nei workout successivi
+  le serie aggiunte dalla progressione, fino al limite esistente.
+
+### Esecuzione automatica finale
+
+Da `E:\Workspace\openGym\frontend`:
+
+```powershell
+npm.cmd test
+node scripts/check-locales.mjs
+npm.cmd run build
+```
+
+Risultato effettivo:
+
+```text
+Test Files  18 passed (18)
+Tests       344 passed (344)
+Failed      0
+11 locales, 688 keys each — in sync.
+Vite build  Pass — 111 modules transformed
+```
+
+La build segnala chunk superiori a 1.500 kB. È un warning non bloccante e non specifico della
+modifica; non sono stati rilevati errori di compilazione.
+
+Test mirati utili durante lo sviluppo:
+
+```powershell
+cd E:\Workspace\openGym\frontend
+npm.cmd test -- progression confirmedRepRangeConfig workout-prescription confirmed-rep-range.integration format ui history plan-share
+```
+
+Ultimo esito mirato prima della suite completa: `8 file / 229 test Pass`.
+
+### Fixture legacy aggiunte
+
+I test caricano questi file reali, non oggetti descritti soltanto nel report:
+
+- `frontend/src/test/fixtures/confirmed-rep-range-legacy-no-history.json`;
+- `frontend/src/test/fixtures/confirmed-rep-range-legacy-history-target-10.json`;
+- `frontend/src/test/fixtures/confirmed-rep-range-legacy-plan-target-10.json`.
+
+Copertura verificata:
+
+1. backup senza storico: il vecchio target configurabile 10 viene letto ma la prima prescrizione
+   parte da 8;
+2. backup con storico: lo snapshot target 10 resta autorevole e la prossima prescrizione è 11;
+3. workout attivo pre-upgrade: target e righe a 10 non vengono riscritti;
+4. piano legacy: parsing e merge riescono; il successivo export promuove `weightIncrement: 2` a
+   `inc: 2` e omette il target configurabile;
+5. nessuna funzione di lettura riscrive byte logicamente equivalenti dello storico.
+
+### API e frontend HTTP smoke
+
+Sintassi backend:
+
+```powershell
+cd E:\Workspace\openGym
+node --check api/server.js
+```
+
+Avvio isolato con directory dati temporanea:
+
+```powershell
+New-Item -ItemType Directory -Path 'E:\Workspace\openGym\.tmp-api-ux-check'
+cd E:\Workspace\openGym\api
+$env:DATA_DIR='E:\Workspace\openGym\.tmp-api-ux-check'
+$env:PORT='3107'
+$env:RP_ID='localhost'
+$env:ORIGIN='http://localhost:3107'
+node server.js
+```
+
+Da un secondo terminale:
+
+```powershell
+(Invoke-WebRequest -UseBasicParsing http://127.0.0.1:3107/api/health).Content
+```
+
+Risultato: `{"ok":true,"users":0}`, **Pass**. Il server è stato arrestato e la sola directory
+temporanea esplicitamente verificata dentro il repository è stata rimossa.
+
+Smoke del bundle costruito:
+
+```powershell
+cd E:\Workspace\openGym\frontend
+npm.cmd run preview -- --host 127.0.0.1 --port 4177
+```
+
+Da un secondo terminale:
+
+```powershell
+$r = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:4177/
+$r.StatusCode
+$r.Content.Contains('id="root"')
+```
+
+Risultato: HTTP `200`, root presente, **Pass**.
+
+### Verifica browser responsive
+
+La build demo è stata servita con:
+
+```powershell
+cd E:\Workspace\openGym\frontend
+$env:VITE_DEMO='1'
+npm.cmd run dev -- --host 127.0.0.1 --port 4174
+```
+
+Una sessione Chromium 151 headless ha aperto una configurazione Confirmed con 3 serie, range
+8–12, carico 70 kg, incremento 2 kg, recupero base 120 s, effettivo 180 s e limite automatico
+150 s. Sono state misurate le viewport 320, 360, 375, 390, 430 e 640 px, più un reflow a 320 CSS
+px con device scale factor 2.
+
+Risultati:
+
+- `document.scrollWidth === document.clientWidth` in ogni scenario;
+- nessun discendente oltre il viewport;
+- una colonna a 320 px e nel reflow equivalente 200%; massimo due colonne da 360 a 640 px;
+- nessuna label con ellissi, clipping o testo vuoto;
+- associazioni `label/for/input` valide;
+- stepper e preset almeno 44 × 44 px, con nomi accessibili contestuali;
+- assenti `Target prima sessione` e il campo generico `Ripetizioni`;
+- presenti tutti i `fieldset/legend` semantici;
+- policy ereditata riepilogata come `3 × 8–12 · 70 kg`;
+- preset 2 e anteprima `70 → 72 kg` corretti;
+- recupero 180 s mostrato senza clamp nonostante il limite automatico 150 s, con warning e
+  motivazione;
+- anteprima del prossimo workout coerente: `3 × 8 @ 70 kg`, recupero 180 s.
+
+Il reflow 200% non sostituisce una prova con text-size del sistema operativo o uno screen reader.
+Durante il test le sole richieste media demo hanno restituito 502 perché il backend immagini non
+era avviato; i moduli e i controlli verificati non hanno prodotto errori. Profilo browser, cache e
+script temporanei sono stati rimossi dopo aver verificato il percorso, e non compaiono nel
+working tree.
+
+Una seconda sessione browser mirata a input invalido, tab order, contrasto, lingua tedesca e click
+dei pulsanti nel workout è stata richiesta dopo gli ultimi hardening, ma l’avvio elevato del
+browser è stato rifiutato dal limite d’uso dell’ambiente. Questi punti restano quindi
+**Blocked/Parziali** nella matrice; il fallback automatico sui resolver, sulla validazione pura e
+sul markup accessibile è Pass, ma non viene presentato come interazione browser eseguita.
+
+Replica manuale senza script headless:
+
+1. avviare la demo col comando sopra e aprire `http://127.0.0.1:4174`;
+2. configurare o importare una routine Confirmed con i valori indicati;
+3. aprire DevTools, attivare la device toolbar e ripetere 320/360/375/390/430/640 px;
+4. a ogni larghezza controllare overflow orizzontale, colonne, label, valori, pulsanti e
+   anteprime;
+5. impostare zoom browser 200% e ripetere il controllo a 640 px fisici;
+6. usare Tab/Shift+Tab per verificare ordine e focus; provare tema chiaro/scuro e una lingua con
+   stringhe lunghe;
+7. inserire `1,234` come incremento: deve comparire “Usa al massimo due cifre decimali.”, Salva
+   deve essere disabilitato e il draft non deve essere troncato; inserire `0,001`: deve comparire
+   il minimo 0,01; scegliere il preset 2: l’errore deve sparire, Salva deve riattivarsi e
+   l’anteprima deve tornare 70 → 72;
+8. avviare un workout con incremento 2, modificare poi la routine a 5 e verificare che i pulsanti
+   del workout già attivo continuino 70 → 72 → 74.
+
+### Difetti trovati durante il collaudo e corretti
+
+1. Gli incrementi venivano usati anche come griglia assoluta, producendo risultati diversi dal
+   delta mostrato.
+2. Il primo workout Confirmed dopo un’altra strategia poteva avere piano, snapshot e righe con
+   carichi differenti.
+3. Un incremento temporale personalizzato veniva ignorato.
+4. Un bodyweight Confirmed poteva inventare un carico alla seconda conferma.
+5. La serie aggiunta a un bodyweight durava un solo workout e poi tornava al valore di routine.
+6. Un `inc` canonico presente ma invalido poteva riattivare uno `weightIncrement` legacy, anche
+   nei controlli di un workout attivo.
+7. I nuovi input con tre decimali venivano normalizzati senza feedback; dopo il primo rifiuto
+   esplicito Salva chiudeva ancora il foglio mantenendo silenziosamente il vecchio valore. Ora il
+   draft resta visibile con alert e Salva è disabilitato finché l’input non è valido.
+8. Il formatter numerico globale era stato esteso a due decimali, modificando anche speed,
+   effort e peso corporeo; è stato sostituito da `fmtLoad` nei soli contesti di carico.
+9. `topRangeStreak: 0` veniva materializzato nella routine pur essendo stato derivato dallo
+   storico; ora resta soltanto nella prescrizione/snapshot.
+10. La normalizzazione del range era duplicata e poteva divergere fra riepilogo e dominio.
+11. Nuovi piani condivisi potevano perdere l’incremento legacy o continuare a esportare il target
+   iniziale obsoleto.
+12. Quattro asserzioni bodyweight sono inizialmente fallite dopo il carry delle serie perché il
+   piano esponeva inutilmente `sets` anche quando uguale alla routine; la correzione ora lo espone
+   soltanto quando serve a preservare una progressione storica. Suite nuovamente verde.
+13. La conferma del peso di lavoro arrotondava ancora 63,75 a 63,8; `TopWeight` e il relativo
+   controllo ora calcolano, mostrano e persistono i carichi al centesimo, mentre il peso corporeo
+   resta a un decimale.
+14. La progressione bodyweight non-Confirmed ricavava le serie dal numero di righe: una serie
+   extra diventava permanente e una riga mancante poteva cancellare una serie prescritta. Ora usa
+   `target.sets`, con fallback al conteggio soltanto per gli snapshot legacy.
+15. Il campo numerico rimuoveva il segno prima della validazione, trasformando `-0,25` in `+0,25`.
+   La validazione raw ora rifiuta segni, testo, unità e separatori duplicati senza perdere il draft.
+16. Il formatter a centesimi era usato anche sulle curve cardio/time; ora Stats sceglie `fmtLoad`
+   soltanto per carichi ed e1RM e mantiene il formatter generico per velocità e secondi.
+17. Piani legacy potevano importare runtime state (`topRangeStreak`, epoch e streak recupero)
+   dentro la routine. Il parser li elimina e l’editor ripulisce lo streak legacy sugli espliciti
+   passaggi a Confirmed.
+18. Cambiare Linear/Double/Greyskull dopo un draft invalido azzerava l’alert senza smontare il
+   campo, lasciando visibile un valore non valido con Salva riattivato. Il cambio policy ora resetta
+   insieme messaggio e draft.
+19. Un workout bodyweight pre-snapshot con quattro righe veniva interpretato usando le tre serie
+   della configurazione corrente. Il reader ora separa le serie usate per valutare lo storico da
+   quelle realmente prescritte/svolte e conserva il fallback legacy corretto.
+20. La curva e1RM poteva usare l’unità `s` se l’ultima modalità dello stesso esercizio era Time;
+   formatter e tooltip e1RM ora usano sempre l’unità di carico del profilo.
+
+### Gate Docker/CasaOS e sincronizzazione reale
+
+Il comando seguente è stato tentato ma PowerShell ha restituito `docker: comando non trovato`:
+
+```powershell
+cd E:\Workspace\openGym
+docker compose config --quiet
+```
+
+Di conseguenza compose, riavvio dei container e persistenza CasaOS sono **Blocked**, non Pass.
+Per replicarli sulla macchina CasaOS:
+
+```bash
+cd /percorso/di/openGym
+git rev-parse --short HEAD
+git status --short
+docker compose config --quiet
+docker compose up -d --build --force-recreate
+docker compose ps
+curl --fail http://localhost:8080/api/health
+curl --fail --head http://localhost:8080/
+```
+
+Poi:
+
+1. salvare una configurazione con incremento 2 e, se presente, un reset recupero;
+2. aggiornare la pagina e verificare gli stessi valori;
+3. attendere almeno due secondi per il push dello stato autenticato;
+4. aprire un secondo browser autenticato e verificare incremento, range e recupero;
+5. eseguire `docker compose down` **senza `-v`**;
+6. eseguire `docker compose up -d` e ripetere i controlli;
+7. verificare un vecchio workout: target, carico, incremento e recupero snapshot devono essere
+   immutati.
+
+Non usare `docker compose down -v`: eliminerebbe deliberatamente i dati persistenti e renderebbe
+invalido il test.
+
+### Valutazione finale dell’iterazione
+
+Il gate di codice, compatibilità JSON, build, API locale e responsive browser è **Pass**. Non sono
+noti difetti funzionali residui nell’ambito implementato. La promozione su CasaOS resta
+condizionata ai gate Docker/sync descritti sopra e alle verifiche assistive manuali che richiedono
+screen reader, text-size OS e dispositivo reale.

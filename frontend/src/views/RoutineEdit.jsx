@@ -54,7 +54,14 @@ export default function RoutineEdit() {
           const routine = s.routines.find(x => x.id === id)
           routine.prog = v
           if (v === 'confirmed_rep_range') routine.ex.forEach(ex => {
-            if (!ex.prog && modeOf(ex) === 'reps') Object.assign(ex, confirmedRepRangeConfig(ex, s.restSec))
+            if (!ex.prog && modeOf(ex) === 'reps') {
+              Object.assign(ex, confirmedRepRangeConfig(ex, s.restSec))
+              // Legacy routine configuration could carry a user-selected first target. The
+              // strategy now derives it from minReps; remove it on this explicit routine edit
+              // without touching targetReps snapshots in completed or active workouts.
+              delete ex.targetReps
+              delete ex.topRangeStreak
+            }
           })
         })}
         options={POLICIES_FOR.reps.map(p => ({ value: p, label: t(POLICY_NAME[p]), subtitle: t(POLICY_DESC[p]) }))} />
@@ -74,7 +81,7 @@ export default function RoutineEdit() {
           exConfigSheet(ex, e, cfg => edit(x => { x[i] = { id: x[i].id, sg: x[i].sg, ...cfg } }), () => edit(x => { x.splice(i, 1); cleanupSg(x) }), r)
         }}>
           <Thumb ex={ex} />
-          <div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit)}</div></div>
+          <div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit, r)}</div></div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: 'none', alignItems: 'center' }}>
             {i > 0 && <button className={'iconbtn' + (linkedPrev ? ' on-ss' : '')} title={t('Superset with exercise above')} style={{ width: 32, height: 28, borderRadius: 8, fontSize: 15 }} onClick={ev => { ev.stopPropagation(); toggleLink(i) }}><Icon name="link" /></button>}
             <div style={{ display: 'flex', gap: 2 }}>

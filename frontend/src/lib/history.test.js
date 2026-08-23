@@ -57,6 +57,7 @@ describe('fmtSec', () => {
 describe('setLabel', () => {
   it('describes each mode in its own terms', () => {
     expect(setLabel(LIFT, { w: 60, r: 10 })).toBe('60×10')
+    expect(setLabel(LIFT, { w: 63.75, r: 8 })).toBe('63.75×8')
     expect(setLabel(CARDIO, { min: 20, speed: 9 })).toBe('20 min @ 9 km/h')
     expect(setLabel(LIFT, { sec: 45, w: 0 }, { mode: 'time' })).toBe('0:45')
     expect(setLabel(LIFT, { sec: 90, w: 20 }, { mode: 'time' })).toBe('1:30 · 20')
@@ -328,9 +329,37 @@ describe('exLine', () => {
   it('summarises a planned exercise per mode', () => {
     expect(exLine({ id: LIFT, sets: 3, reps: 10 }, 'kg')).toBe('3 × 10')
     expect(exLine({ id: LIFT, sets: 3, reps: 10, weight: 60 }, 'kg')).toBe('3 × 10 · 60 kg')
+    expect(exLine({ id: LIFT, sets: 3, reps: 8, weight: 63.75 }, 'kg')).toBe('3 × 8 · 63.75 kg')
     expect(exLine({ id: LIFT, sets: 3, sec: 45, mode: 'time' }, 'kg')).toBe('3 × 0:45')
     expect(exLine({ id: LIFT, sets: 2, sec: 90, weight: 20, mode: 'time' }, 'kg')).toBe('2 × 1:30 · 20 kg')
     expect(exLine({ id: CARDIO, sets: 1, min: 20, speed: 8 }, 'kg')).toBe('1 × 20 min @ 8 km/h')
+  })
+  it('shows the Confirmed range for direct and routine-inherited policies', () => {
+    expect(exLine({
+      id: LIFT, sets: 3, reps: 8, minReps: 8, maxReps: 12,
+      weight: 70, prog: 'confirmed_rep_range'
+    }, 'kg')).toBe('3 × 8–12 · 70 kg')
+    expect(exLine({
+      id: LIFT, sets: 3, reps: 8, minReps: 8, maxReps: 12, weight: 70
+    }, 'kg', { prog: 'confirmed_rep_range' })).toBe('3 × 8–12 · 70 kg')
+    expect(exLine({
+      id: LIFT, sets: 3, reps: 10
+    }, 'kg', { prog: 'confirmed_rep_range' })).toBe('3 × 8–12')
+    expect(exLine({
+      id: LIFT, sets: 3, minReps: Infinity, maxReps: NaN
+    }, 'kg', { prog: 'confirmed_rep_range' })).toBe('3 × 8–12')
+    expect(exLine({
+      id: LIFT, sets: 3, minReps: 0, maxReps: 0
+    }, 'kg', { prog: 'confirmed_rep_range' })).toBe('3 × 1–1')
+    expect(exLine({
+      id: LIFT, sets: 3, side: true, minReps: 0, maxReps: 0
+    }, 'kg', { prog: 'confirmed_rep_range' })).toBe('3 × 2–2 · 1–1/side')
+  })
+  it('shows the total and per-side range for unilateral Confirmed work', () => {
+    expect(exLine({
+      id: LIFT, sets: 3, side: true, minReps: 16, maxReps: 20,
+      prog: 'confirmed_rep_range'
+    }, 'kg')).toBe('3 × 16–20 · 8–10/side')
   })
 })
 

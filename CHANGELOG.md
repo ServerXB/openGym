@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Confirmed Rep-Range configuration is deterministic.** The first session and every session
+  after a load increase start at the minimum of the configured rep range; the redundant
+  configurable first-session target is no longer shown or exported.
+- **Exact load increments.** Presets include 2, 2.5 and 5 kg/lb, custom two-decimal increments are
+  preserved, and progression applies the selected delta instead of rounding to a fixed grid.
+- **Clearer exercise settings.** Confirmed fields are grouped into Sets, Load, Rep range and
+  Recovery, labels wrap instead of being truncated, controls meet a 44 px touch target and the
+  layout adapts from two columns to one on very narrow screens.
+- **Backward-compatible snapshots and sharing.** New workouts capture sets, weight, duration and
+  increment; old plan JSON remains importable, while completed and already-active prescriptions
+  retain their historical target values.
+
 > **About this fork.** v1.2.4 and everything below it happened in the original repository,
 > by its original author, before it was taken down. Links to GitHub and to the live demo have been
 > repointed here so they resolve, but the entries themselves describe the original project —
