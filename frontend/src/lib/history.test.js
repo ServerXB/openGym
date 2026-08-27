@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { modeOf, isTimed, fmtSec, setLabel, defaultConfig, buildSets, exLine, workoutVolume, effortOf, stepEffort, capEffort, isBw, isPerSide, sideReps, repStep } from './history.js'
 import { EXDB } from './exercises.js'
+import { normalizeProgressionScopes } from './progression-scope.js'
 
 // Real ids out of the shipped catalogue, so the body-part fallback is exercised for real.
 const CARDIO = EXDB.find(e => e.bp === 'cardio').id
@@ -402,6 +403,67 @@ describe('buildSets', () => {
   it('still prefers the confirmed working weight for reps sets', () => {
     const S = { exWeights: { [LIFT]: { w: 75 } }, workouts: [{ d: '2026-01-01', entries: [{ id: LIFT, sets: [{ w: 60, r: 10, done: true }] }] }] }
     expect(buildSets(S, { id: LIFT, sets: 1, reps: 8, weight: 50 })).toEqual([{ w: 75, r: 10, done: false }])
+  })
+
+  it('uses only the matching progression entry when one workout contains duplicate exercises', () => {
+    const S = {
+      exWeights: { [LIFT]: { w: 100 } },
+      progressionWeights: { 'pg-a': { w: 72 }, 'pg-b': { w: 42 } },
+      workouts: [{
+        d: '2026-01-01',
+        entries: [
+          { id: LIFT, progressionId: 'pg-a', sets: [{ w: 72, r: 9, done: true }] },
+          { id: LIFT, progressionId: 'pg-b', sets: [{ w: 42, r: 15, done: true }] }
+        ]
+      }]
+    }
+    expect(buildSets(S, { id: LIFT, progressionId: 'pg-a', sets: 1, reps: 8, weight: 50 }))
+      .toEqual([{ w: 72, r: 9, done: false }])
+    expect(buildSets(S, { id: LIFT, progressionId: 'pg-b', sets: 1, reps: 12, weight: 30 }))
+      .toEqual([{ w: 42, r: 15, done: false }])
+  })
+
+  it('lets legacy unscoped history seed every new scope but ignores another new scope', () => {
+    const S = {
+      exWeights: {}, progressionWeights: {},
+      workouts: [
+        { d: '2025-12-01', entries: [{ id: LIFT, sets: [{ w: 60, r: 8, done: true }] }] },
+        { d: '2026-01-01', entries: [{ id: LIFT, progressionId: 'pg-b', sets: [{ w: 90, r: 5, done: true }] }] }
+      ]
+    }
+    expect(buildSets(S, { id: LIFT, progressionId: 'pg-a', sets: 1, reps: 8, weight: 50 }))
+      .toEqual([{ w: 60, r: 8, done: false }])
+  })
+
+  it('prefers an exact scoped occurrence over an earlier legacy occurrence in one workout', () => {
+    const S = {
+      exWeights: {}, progressionWeights: {},
+      routines: [{ id: 'day-a', ex: [{ id: LIFT, progressionId: 'pg-a' }] }],
+      workouts: [{
+        routineId: 'day-a', d: '2026-01-01',
+        entries: [
+          { id: LIFT, sets: [{ w: 50, r: 6, done: true }] },
+          { id: LIFT, progressionId: 'pg-a', sets: [{ w: 72, r: 9, done: true }] }
+        ]
+      }]
+    }
+    expect(buildSets(S, { id: LIFT, progressionId: 'pg-a', sets: 1, reps: 8, weight: 60 }))
+      .toEqual([{ w: 72, r: 9, done: false }])
+  })
+
+  it('does not use the global PR as the starting load of divergent progression groups', () => {
+    const S = {
+      exWeights: { [LIFT]: { w: 120 } }, workouts: [],
+      routines: [
+        { id: 'light', ex: [{ id: LIFT, sets: 1, reps: 10, weight: 40 }] },
+        { id: 'heavy', ex: [{ id: LIFT, sets: 1, reps: 5, weight: 100 }] }
+      ]
+    }
+    normalizeProgressionScopes(S)
+    const [light, heavy] = S.routines.map(routine => routine.ex[0])
+    expect(buildSets(S, light)).toEqual([{ w: 40, r: 10, done: false }])
+    expect(buildSets(S, heavy)).toEqual([{ w: 100, r: 5, done: false }])
+    expect(S.exWeights[LIFT].w).toBe(120)
   })
 })
 

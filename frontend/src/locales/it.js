@@ -3,6 +3,15 @@ import confirmedRepRangeFallback from '../lib/confirmedRepRangeLocaleFallback.js
 
 export default {
   ...confirmedRepRangeFallback,
+  'Progression history': 'Storico della progressione',
+  'Scope': 'Ambito',
+  'Shared progression': 'Progressione condivisa',
+  'Independent progression': 'Progressione indipendente',
+  'Equivalent configurations in compatible routines use the same weight, target, streak and recovery history.': 'Le configurazioni equivalenti nelle routine compatibili usano gli stessi storici di peso, target, serie positiva e recupero.',
+  'This configuration has its own future weight, target, streak and recovery history.': 'Questa configurazione ha uno storico futuro indipendente per peso, target, serie positiva e recupero.',
+  'Shared with: {0}': 'Condivisa con: {0}',
+  'Changing a material setting separates future progression automatically; completed workouts are never rewritten.': 'La modifica di un parametro sostanziale separa automaticamente la progressione futura; gli allenamenti completati non vengono mai riscritti.',
+  'Saving separates this progression from the next workout. It starts from the edited configuration and current working load; the shared completed history remains unchanged.': 'Salvando, la progressione si separa dal prossimo allenamento. Riparte dalla configurazione modificata e dal carico operativo corrente; lo storico completato condiviso resta invariato.',
   'Confirm': 'Conferma',
   'Cancel': 'Annulla',
   'Delete': 'Elimina',
@@ -532,6 +541,7 @@ export default {
   'Reset to {0}s': 'Reimposta a {0}s',
   'Recovery is already at the initial value': 'Il recupero è già al valore iniziale',
   'Recovery history is shared by exercise, so this reset applies to the exercise in every routine, subject to each configuration\'s maximum. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.': 'Lo storico del recupero è condiviso per esercizio, quindi il reset si applica all’esercizio in tutte le routine, rispettando il massimo di ogni configurazione. Riguarda solo gli allenamenti futuri; peso, ripetizioni obiettivo, conferma al limite superiore e allenamenti completati restano invariati. Il conteggio automatico del recupero riparte.',
+  'Recovery follows this progression. The reset also applies to another routine only when it shares the same progression. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.': 'Il recupero segue questa progressione. Il reset si applica a un’altra routine solo quando condivide la stessa progressione. Riguarda soltanto gli allenamenti futuri; peso, ripetizioni obiettivo, conferma al limite superiore e allenamenti completati restano invariati. Il conteggio automatico del recupero riparte.',
   'Recovery reset to {0}s for the next workout.': 'Recupero reimpostato a {0}s per il prossimo allenamento.',
   'Changing the initial recovery takes effect after Save and does not reset the effective recovery.': 'La modifica del recupero iniziale entra in vigore dopo il salvataggio e non reimposta il recupero effettivo.',
   'Recovery manually reset to {0}s for the next workout.': 'Recupero reimpostato manualmente a {0}s per il prossimo allenamento.',

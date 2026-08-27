@@ -4,13 +4,15 @@ import { localTZ } from '../lib/format.js'
 import { registerCustom } from '../lib/exercises.js'
 import { DEMO, DEMO_SEEDED } from '../lib/demo.js'
 import { MOBILE, nativeLoad, nativeSave, syncReminder } from '../lib/mobile.js'
+import { normalizeProgressionScopes } from '../lib/progression-scope.js'
+import { loadStoredState } from '../lib/state-storage.js'
 
 const KEY = 'gym_state_v1'
 export const DEF = {
   unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
-  exWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
+  exWeights: {}, progressionWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
   // Optional per-exercise controls that change how history is interpreted without rewriting
   // finished workouts. Missing in legacy profiles/backups and therefore always defaulted.
   progressionControls: {},
@@ -23,11 +25,9 @@ export const DEF = {
 const clone = o => JSON.parse(JSON.stringify(o))
 
 function loadState() {
-  try {
-    const raw = localStorage.getItem(KEY)
-    if (raw) return Object.assign(clone(DEF), JSON.parse(raw))
-  } catch (e) { /* ignore */ }
-  return clone(DEF)
+  return loadStoredState(localStorage, KEY, DEF, {
+    prepare: state => registerCustom(state.customEx)
+  })
 }
 
 const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
@@ -44,8 +44,11 @@ export const useStore = create((set, get) => {
   }
 
   const persist = (S, push = true) => {
-    S._ts = Date.now()
+    // Custom catalogue metadata influences mode/bodyweight and therefore group compatibility.
+    // Register it before normalization on load, import, server pull and ordinary updates.
     registerCustom(S.customEx)
+    normalizeProgressionScopes(S)
+    S._ts = Date.now()
     localStorage.setItem(KEY, JSON.stringify(S))
     set({ S })
     if (MOBILE) nativePersist()

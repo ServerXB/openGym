@@ -16,6 +16,7 @@ import { nextPrescription, applyPrescription } from '../lib/progression.js'
 import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
 import { loadIncrementForPrescription, targetForPrescription } from '../lib/workout-prescription.js'
+import { progressionScopeSnapshot } from '../lib/progression-scope.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -64,7 +65,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   const mode = modeOf({ ...(entry.target || {}), id: entry.id })
   const cardio = mode === 'cardio'
   const timed = mode === 'time'
-  const last = lastEntryFor(S, entry.id)
+  const last = lastEntryFor(S, entry.id, entry)
   // The same number the "confirm your working weight" sheet calls your best, so the two
   // never disagree inside one session: heaviest logged set, or the working weight you kept.
   const best = cardio ? 0 : Math.max(bestWeightFor(S, entry.id), (S.exWeights[entry.id] || {}).w || 0)
@@ -298,9 +299,17 @@ function ActiveWorkout() {
     <div style={{ height: 10 }} />
     <Button onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => update(s => {
       const full = { ...cfg, id: ex.id }
-      const plan = nextPrescription(s, full, s.routines.find(r => r.id === s.active.routineId))
-      const target = targetForPrescription(cfg, plan)
-      s.active.entries.push({ id: ex.id, target, plan, sets: applyPrescription(buildSets(s, full), plan) })
+      const scope = progressionScopeSnapshot(full)
+      const scoped = { ...full, ...scope }
+      const plan = nextPrescription(s, scoped, s.routines.find(r => r.id === s.active.routineId))
+      const target = targetForPrescription(scoped, plan)
+      s.active.entries.push({
+        id: ex.id,
+        ...scope,
+        target,
+        plan,
+        sets: applyPrescription(buildSets(s, scoped), plan)
+      })
       s.active.cur = s.active.entries.length - 1
     }), null, S.routines.find(r => r.id === A.routineId)))} icon="plus">{t('Add exercise')}</Button>
     <div style={{ height: 10 }} />

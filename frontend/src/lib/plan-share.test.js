@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildPlanBundle, parsePlan, planPrintHTML } from './plan-share.js'
+import { buildPlanBundle, mergePlan, parsePlan, planPrintHTML } from './plan-share.js'
 import { EXDB } from './exercises.js'
 
 describe('plan sharing with Confirmed Rep-Range', () => {
@@ -48,6 +48,85 @@ describe('plan sharing with Confirmed Rep-Range', () => {
 
     const parsed = parsePlan(JSON.stringify(bundle))
     expect(parsed.routines[0].ex[0]).toEqual(exported)
+  })
+
+  it('never exports foreign slot identities and assigns fresh stable identities on merge', () => {
+    const config = {
+      id: 'scoped-lift', sets: 4, reps: 8, weight: 70,
+      routineExerciseId: 'sender-slot', progressionId: 'sender-group',
+      progressionSignature: 'sender-signature'
+    }
+    const source = {
+      routines: [{ id: 'sender-routine', name: 'Scoped', ex: [config] }],
+      customEx: [{ id: config.id, n: 'Scoped lift', bp: 'chest' }],
+      week: {}
+    }
+    const bundle = buildPlanBundle(source)
+    expect(bundle.routines[0].ex[0]).not.toHaveProperty('routineExerciseId')
+    expect(bundle.routines[0].ex[0]).not.toHaveProperty('progressionId')
+    expect(bundle.routines[0].ex[0].progressionGroup).toMatch(/^g\d+$/)
+
+    // A hand-edited bundle cannot smuggle runtime ids through the tolerant parser either.
+    bundle.routines[0].ex[0].routineExerciseId = 'foreign-slot'
+    bundle.routines[0].ex[0].progressionId = 'foreign-group'
+    bundle.routines[0].ex[0].progressionSignature = 'foreign-signature'
+    const parsed = parsePlan(bundle)
+    expect(parsed.routines[0].ex[0]).not.toHaveProperty('routineExerciseId')
+    expect(parsed.routines[0].ex[0]).not.toHaveProperty('progressionId')
+
+    const state = { routines: [], customEx: [], week: {}, exWeights: {} }
+    mergePlan(state, parsed)
+    const imported = state.routines[0].ex[0]
+    expect(imported.routineExerciseId).toMatch(/^routine-exercise:/)
+    expect(imported.progressionId).toMatch(/^progression:/)
+    expect(imported.routineExerciseId).not.toBe('foreign-slot')
+    expect(imported.progressionId).not.toBe('foreign-group')
+  })
+
+  it('preserves plan-local shared and independent groups without joining local history', () => {
+    const exercise = id => ({
+      id: 'scoped-lift', sets: 4, reps: 8, weight: 70,
+      routineExerciseId: `sender-slot-${id}`,
+      progressionId: id
+    })
+    const source = {
+      routines: [
+        { id: 'sender-a', name: 'A', ex: [exercise('sender-shared')] },
+        { id: 'sender-b', name: 'B', ex: [exercise('sender-shared')] },
+        { id: 'sender-c', name: 'C', ex: [exercise('sender-independent')] }
+      ],
+      customEx: [{ id: 'scoped-lift', n: 'Scoped lift', bp: 'chest' }],
+      week: {}
+    }
+    const parsed = parsePlan(buildPlanBundle(source))
+    expect(parsed.routines[0].ex[0].progressionGroup)
+      .toBe(parsed.routines[1].ex[0].progressionGroup)
+    expect(parsed.routines[2].ex[0].progressionGroup)
+      .not.toBe(parsed.routines[0].ex[0].progressionGroup)
+
+    const state = {
+      routines: [{
+        id: 'local', name: 'Local',
+        ex: [{
+          id: 'scoped-lift', sets: 4, reps: 8, weight: 70,
+          routineExerciseId: 'local-slot', progressionId: 'local-progression'
+        }]
+      }],
+      customEx: [{ id: 'scoped-lift', n: 'Scoped lift', bp: 'chest' }],
+      week: {}, exWeights: {}, progressionWeights: {}
+    }
+    mergePlan(state, parsed)
+    const firstImport = state.routines.slice(1, 4).map(routine => routine.ex[0].progressionId)
+    expect(firstImport[0]).toBe(firstImport[1])
+    expect(firstImport[2]).not.toBe(firstImport[0])
+    expect(firstImport).not.toContain('local-progression')
+
+    mergePlan(state, parsed)
+    const secondImport = state.routines.slice(4, 7).map(routine => routine.ex[0].progressionId)
+    expect(secondImport[0]).toBe(secondImport[1])
+    expect(secondImport[2]).not.toBe(secondImport[0])
+    expect(secondImport).not.toContain(firstImport[0])
+    expect(secondImport).not.toContain(firstImport[2])
   })
 
   it('still imports an old plan carrying the configurable initial target', () => {

@@ -15,7 +15,7 @@ describe('Confirmed Rep-Range recovery reset state', () => {
     expect(JSON.parse(JSON.stringify(record))).toEqual(record)
   })
 
-  it('stores the control globally by exercise and preserves unrelated controls', () => {
+  it('keeps the legacy raw-exercise API and preserves unrelated controls', () => {
     const S = { progressionControls: { squat: { anotherControl: { enabled: true } } } }
     resetConfirmedRepRangeRest(S, 'squat', {
       epochId: 'rest-epoch-2', resetSeconds: 120, resetAt: 1234
@@ -55,5 +55,21 @@ describe('Confirmed Rep-Range recovery reset state', () => {
     resetConfirmedRepRangeRest(S, 'squat', { epochId: 'first', resetSeconds: 120, resetAt: 1 })
     resetConfirmedRepRangeRest(S, 'squat', { epochId: 'second', resetSeconds: 150, resetAt: 2 })
     expect(confirmedRepRangeRestControl(S, 'squat')).toMatchObject({ epochId: 'second', resetSeconds: 150, resetAt: 2 })
+  })
+
+  it('writes independent controls per progression group and inherits a legacy reset until overridden', () => {
+    const legacy = { epochId: 'legacy', resetSeconds: 120, resetAt: 1 }
+    const S = { progressionControls: { squat: { confirmedRepRangeRest: legacy } } }
+    const a = { id: 'squat', progressionId: 'pg-a' }
+    const b = { id: 'squat', progressionId: 'pg-b' }
+
+    expect(confirmedRepRangeRestControl(S, a)).toEqual(legacy)
+    expect(confirmedRepRangeRestControl(S, b)).toEqual(legacy)
+
+    resetConfirmedRepRangeRest(S, a, { epochId: 'a-reset', resetSeconds: 90, resetAt: 2 })
+    expect(confirmedRepRangeRestControl(S, a)).toMatchObject({ epochId: 'a-reset', resetSeconds: 90 })
+    expect(confirmedRepRangeRestControl(S, b)).toEqual(legacy)
+    expect(S.progressionControls['pg-a']).toBeDefined()
+    expect(S.progressionControls['pg-b']).toBeUndefined()
   })
 })

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { estimate1RM, bestSetOf, e1rmSeries, best1RM, is1RMRecord, REP_CAP, FORMULAS } from './onerm.js'
+import {
+  estimate1RM, bestSetOf, bestSetOfEntries, e1rmSeries, best1RM,
+  is1RMRecord, is1RMRecordForEntries, REP_CAP, FORMULAS
+} from './onerm.js'
 
 describe('estimate1RM', () => {
   it('returns the load unchanged for a single rep', () => {
@@ -94,6 +97,25 @@ describe('bestSetOf', () => {
   })
 })
 
+describe('bestSetOfEntries', () => {
+  it('uses every occurrence of an exercise in the workout', () => {
+    const entries = [
+      { id: 'bench', sets: [{ w: 80, r: 5, done: true }] },
+      { id: 'bench', sets: [{ w: 100, r: 6, done: true }] }
+    ]
+    expect(bestSetOfEntries(entries)).toEqual({ est: 120, w: 100, r: 6 })
+  })
+
+  it('ignores empty occurrences and survives an empty collection', () => {
+    expect(bestSetOfEntries([
+      { id: 'bench', sets: [{ w: 200, r: 5, done: false }] },
+      { id: 'bench', sets: [{ w: 90, r: 5, done: true }] }
+    ])).toEqual({ est: 105, w: 90, r: 5 })
+    expect(bestSetOfEntries([])).toBeNull()
+    expect(bestSetOfEntries()).toBeNull()
+  })
+})
+
 const S = {
   workouts: [
     { d: '2026-01-01', start: 1, entries: [{ id: 'bench', sets: [{ w: 80, r: 5, done: true }] }] },
@@ -113,6 +135,22 @@ describe('e1rmSeries / best1RM', () => {
 
   it('reports the all-time best with the set behind it', () => {
     expect(best1RM(S, 'bench')).toEqual({ est: 105, w: 90, r: 5, d: '2026-01-15', t: 3 })
+  })
+
+  it('emits one workout point using the best set across duplicate exercise entries', () => {
+    const duplicate = {
+      workouts: [{
+        d: '2026-02-01', start: 6, entries: [
+          { id: 'bench', sets: [{ w: 80, r: 5, done: true }] },
+          { id: 'squat', sets: [{ w: 140, r: 3, done: true }] },
+          { id: 'bench', sets: [{ w: 100, r: 6, done: true }] }
+        ]
+      }]
+    }
+    expect(e1rmSeries(duplicate, 'bench')).toEqual([
+      { t: 6, d: '2026-02-01', y: 120, w: 100, r: 6 }
+    ])
+    expect(best1RM(duplicate, 'bench')).toEqual({ est: 120, w: 100, r: 6, d: '2026-02-01', t: 6 })
   })
 
   it('has nothing to say about cardio or an unknown exercise', () => {
@@ -144,5 +182,13 @@ describe('is1RMRecord', () => {
   it('says nothing for a timed or unfinished entry', () => {
     expect(is1RMRecord(S, 'plank', { id: 'plank', sets: [{ sec: 90, done: true }] })).toBeNull()
     expect(is1RMRecord(S, 'bench', { id: 'bench', sets: [{ w: 200, r: 5, done: false }] })).toBeNull()
+  })
+
+  it('evaluates duplicate entries together and returns only their best record', () => {
+    const rec = is1RMRecordForEntries(S, 'bench', [
+      { id: 'bench', sets: [{ w: 90, r: 5, done: true }] },
+      { id: 'bench', sets: [{ w: 95, r: 6, done: true }] }
+    ])
+    expect(rec).toEqual({ est: 114, w: 95, r: 6, prev: 105 })
   })
 })

@@ -14,6 +14,7 @@ import { POLICIES_FOR, POLICY_NAME, POLICY_DESC } from '../lib/progression.js'
 import BodyMap from '../components/BodyMap.jsx'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
 import { confirmedRepRangeConfig } from '../lib/confirmedRepRangeConfig.js'
+import { createRoutineExerciseId } from '../lib/progression-scope.js'
 
 export default function RoutineEdit() {
   const nav = useNavigate()
@@ -75,10 +76,22 @@ export default function RoutineEdit() {
       // could neither see nor delete, but that still turned up in the workout.
       const ex = exOr(e.id)
       const linkedPrev = i > 0 && e.sg && r.ex[i - 1].sg === e.sg
-      return <div key={i}>
+      return <div key={e.routineExerciseId || i}>
         {unitFirst.has(i) && <div className="ss-label"><Icon name="link" />{t('Superset')}</div>}
         <div className={'item' + (inSS.has(i) ? ' in-ss' : '')} onClick={() => {
-          exConfigSheet(ex, e, cfg => edit(x => { x[i] = { id: x[i].id, sg: x[i].sg, ...cfg } }), () => edit(x => { x.splice(i, 1); cleanupSg(x) }), r)
+          exConfigSheet(ex, e, cfg => edit(x => {
+            const current = x[i]
+            x[i] = {
+              id: current.id,
+              sg: current.sg,
+              ...cfg,
+              // Editing configuration must not turn this into a new routine slot. The store
+              // reconciles progressionId afterwards if the effective progression diverged.
+              routineExerciseId: current.routineExerciseId,
+              progressionId: current.progressionId,
+              progressionSignature: current.progressionSignature
+            }
+          }), () => edit(x => { x.splice(i, 1); cleanupSg(x) }), r)
         }}>
           <Thumb ex={ex} />
           <div className="grow"><div className="tt capitalize">{ex.n}</div><div className="ss">{exLine(e, S.unit, r)}</div></div>
@@ -108,7 +121,9 @@ export default function RoutineEdit() {
     })()}
 
     <div className="small dim row" style={{ margin: '10px 2px', gap: 5 }}><Icon name="link" style={{ fontSize: 13 }} />{t('Tap the link button on an exercise to superset it with the one above — you’ll do them back-to-back.')}</div>
-    <Button variant="primary" onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => edit(x => { x.push({ id: ex.id, ...cfg }) }), null, r))} icon="plus">{t('Add exercise')}</Button>
+    <Button variant="primary" onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => edit(x => {
+      x.push({ id: ex.id, ...cfg, routineExerciseId: createRoutineExerciseId(uid()) })
+    }), null, r))} icon="plus">{t('Add exercise')}</Button>
     <div style={{ height: 10 }} />
     <Button variant="danger" onClick={() => confirmSheet({
       title: t('Delete routine?'), message: t('“{0}” and its exercises will be removed.', r.name), confirmText: t('Delete'), danger: true,

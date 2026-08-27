@@ -1,4 +1,5 @@
 import { uid } from './format.js'
+import { LEGACY_PROGRESSION_PREFIX, progressionIdOf } from './progression-scope.js'
 
 export const CONFIRMED_REP_RANGE_REST_CONTROL = 'confirmedRepRangeRest'
 
@@ -9,16 +10,36 @@ const seconds = value => {
 }
 
 /**
- * Return the current recovery epoch for an exercise, or null for legacy profiles.
+ * Return the current recovery epoch for a progression group, or null for legacy profiles.
  *
- * Recovery controls live at profile level because Confirmed Rep-Range history is scoped by
- * exercise id (not by routine). Keeping this read tolerant makes profiles and backups created
- * before recovery reset support valid without a migration.
+ * Keeping the lookup tolerant of the old raw exercise-id key makes profiles and backups created
+ * before scoped progression valid without a manual migration.
  */
-export function confirmedRepRangeRestControl(S, exerciseId) {
-  const value = S?.progressionControls?.[exerciseId]?.[CONFIRMED_REP_RANGE_REST_CONTROL]
-  if (!value || typeof value.epochId !== 'string' || !value.epochId || !Number.isFinite(value.resetSeconds) || value.resetSeconds < 0) return null
-  return value
+const scopeKeys = scope => {
+  if (scope && typeof scope === 'object') {
+    const primary = progressionIdOf(scope)
+    return [primary, scope.id].filter((value, index, all) => value && all.indexOf(value) === index)
+  }
+  if (typeof scope !== 'string' || !scope) return []
+  const rawExerciseId = scope.startsWith(LEGACY_PROGRESSION_PREFIX)
+    ? scope.slice(LEGACY_PROGRESSION_PREFIX.length)
+    : null
+  return [scope, rawExerciseId].filter(Boolean)
+}
+
+const validControl = value =>
+  !!value
+  && typeof value.epochId === 'string'
+  && !!value.epochId
+  && Number.isFinite(value.resetSeconds)
+  && value.resetSeconds >= 0
+
+export function confirmedRepRangeRestControl(S, scope) {
+  for (const key of scopeKeys(scope)) {
+    const value = S?.progressionControls?.[key]?.[CONFIRMED_REP_RANGE_REST_CONTROL]
+    if (validControl(value)) return value
+  }
+  return null
 }
 
 /** Build a serializable epoch record. Optional values are injectable to keep tests deterministic. */
@@ -39,16 +60,17 @@ export function createConfirmedRepRangeRestReset({
 }
 
 /** Return a new profile with the reset applied, leaving the input profile untouched. */
-export function applyConfirmedRepRangeRestReset(S, exerciseId, options) {
+export function applyConfirmedRepRangeRestReset(S, scope, options) {
   if (!S || typeof S !== 'object') throw new Error('A recovery reset requires a profile.')
-  if (typeof exerciseId !== 'string' || !exerciseId) throw new Error('A recovery reset requires an exercise id.')
+  const progressionId = scopeKeys(scope)[0]
+  if (!progressionId) throw new Error('A recovery reset requires a progression id.')
   const record = createConfirmedRepRangeRestReset(options)
   return {
     ...S,
     progressionControls: {
       ...(S.progressionControls || {}),
-      [exerciseId]: {
-        ...(S.progressionControls?.[exerciseId] || {}),
+      [progressionId]: {
+        ...(S.progressionControls?.[progressionId] || {}),
         [CONFIRMED_REP_RANGE_REST_CONTROL]: record
       }
     }
@@ -59,9 +81,9 @@ export function applyConfirmedRepRangeRestReset(S, exerciseId, options) {
  * Persist a new recovery epoch into a mutable profile draft (for example a Zustand update).
  * Other progression controls on the exercise are deliberately preserved.
  */
-export function resetConfirmedRepRangeRest(S, exerciseId, options) {
-  const next = applyConfirmedRepRangeRestReset(S, exerciseId, options)
+export function resetConfirmedRepRangeRest(S, scope, options) {
+  const next = applyConfirmedRepRangeRestReset(S, scope, options)
   S.progressionControls = next.progressionControls
-  const record = confirmedRepRangeRestControl(next, exerciseId)
+  const record = confirmedRepRangeRestControl(next, scope)
   return record
 }

@@ -800,6 +800,50 @@ describe('sessionsFor', () => {
     const S = { unit: 'kg', workouts: [{ d: '2026-01-01', entries: [{ id: LIFT, sets: [{ w: 60, r: 5, done: true }] }] }] }
     expect(sessionsFor(S, LIFT)).toHaveLength(1)
   })
+
+  it('selects the exact progression when duplicate exercise entries share a workout', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [{
+        d: '2026-01-01',
+        entries: [
+          { id: LIFT, progressionId: 'pg-a', target: { sets: 1, reps: 8 }, sets: [{ w: 60, r: 8, done: true }] },
+          { id: LIFT, progressionId: 'pg-b', target: { sets: 1, reps: 12 }, sets: [{ w: 40, r: 12, done: true }] }
+        ]
+      }]
+    }
+    expect(sessionsFor(S, LIFT, { id: LIFT, progressionId: 'pg-a' })[0]).toMatchObject({ weight: 60, goal: 8 })
+    expect(sessionsFor(S, LIFT, { id: LIFT, progressionId: 'pg-b' })[0]).toMatchObject({ weight: 40, goal: 12 })
+  })
+
+  it('keeps legacy entries as a baseline but excludes another explicit progression', () => {
+    const S = {
+      unit: 'kg',
+      workouts: [
+        { d: '2025-12-01', entries: [{ id: LIFT, target: { sets: 1, reps: 5 }, sets: [{ w: 50, r: 5, done: true }] }] },
+        { d: '2026-01-01', entries: [{ id: LIFT, progressionId: 'pg-b', target: { sets: 1, reps: 8 }, sets: [{ w: 80, r: 8, done: true }] }] }
+      ]
+    }
+    const scoped = sessionsFor(S, LIFT, { id: LIFT, progressionId: 'pg-a', sets: 1, reps: 5 })
+    expect(scoped).toHaveLength(1)
+    expect(scoped[0]).toMatchObject({ d: '2025-12-01', weight: 50 })
+  })
+
+  it('prefers the exact scoped session over an earlier legacy entry in the same workout', () => {
+    const cfg = { id: LIFT, progressionId: 'pg-a', sets: 1, reps: 8 }
+    const S = {
+      unit: 'kg', routines: [{ id: 'day-a', ex: [cfg] }],
+      workouts: [{
+        routineId: 'day-a', d: '2026-01-01',
+        entries: [
+          { id: LIFT, target: { sets: 1, reps: 5 }, sets: [{ w: 50, r: 5, done: true }] },
+          { id: LIFT, progressionId: 'pg-a', target: { sets: 1, reps: 8 }, sets: [{ w: 72, r: 8, done: true }] }
+        ]
+      }]
+    }
+    expect(sessionsFor(S, LIFT, cfg)).toHaveLength(1)
+    expect(sessionsFor(S, LIFT, cfg)[0]).toMatchObject({ weight: 72, goal: 8 })
+  })
 })
 
 // Workouts only began storing their prescription in v1.2.2. Everything logged before that is

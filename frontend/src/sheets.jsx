@@ -3,7 +3,7 @@ import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { EXDB, EXIDX, BODYPARTS, isCardio, isBodyweightEq, allExercises, equipmentOf } from './lib/exercises.js'
 import { fmtDate, fmtLoad, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS } from './lib/format.js'
-import { lastEntryFor, bestWeightFor, buildSets, effectiveRoutineId, workoutVolume, setsDone, setsDoneActive, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
+import { lastEntryFor, bestWeightFor, effectiveRoutineId, workoutVolume, setsDone, setsDoneActive, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
 import { beep, vibrate } from './lib/sound.js'
 import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
 import { nav } from './lib/nav.js'
@@ -17,8 +17,10 @@ import BodyMap from './components/BodyMap.jsx'
 import { loadOfWorkouts } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
-import { estimate1RM, best1RM, is1RMRecord, REP_CAP } from './lib/onerm.js'
-import { nextPrescription, applyPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
+import { estimate1RM, best1RM, REP_CAP } from './lib/onerm.js'
+import { applyWorkoutWeights, recordsForWorkout } from './lib/workout-records.js'
+import { buildScopedWorkoutEntry, completedWorkoutEntries } from './lib/workout-scope.js'
+import { nextPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
 import {
   CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
@@ -27,8 +29,12 @@ import {
   CONFIRMED_REST_REDUCTION_MANUAL
 } from './lib/confirmedRepRangeAutoRest.js'
 import { resetConfirmedRepRangeRest } from './lib/confirmedRepRangeRest.js'
-import { targetForPrescription } from './lib/workout-prescription.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
+import {
+  createRoutineExerciseId,
+  progressionIdOf,
+  progressionScopePreview
+} from './lib/progression-scope.js'
 
 const S = () => useStore.getState().S
 const update = (...a) => useStore.getState().update(...a)
@@ -327,7 +333,11 @@ function AddToRoutine({ ex, close }) {
       update(s => {
         let r = isNew ? { id: uid(), name: t('New routine'), emoji: DEFAULT_GLYPH, ex: [] } : s.routines.find(x => x.id === rid)
         if (isNew) s.routines.push(r)
-        if (r) r.ex.push({ id: ex.id, ...cfg })
+        if (r) r.ex.push({
+          id: ex.id,
+          ...cfg,
+          routineExerciseId: createRoutineExerciseId(uid())
+        })
       })
       const r = isNew ? S().routines[S().routines.length - 1] : st.routines.find(x => x.id === rid)
       toast(t('“{0}” added to {1}', ex.n, r ? r.name : t('routine')))
@@ -516,6 +526,12 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
   // Recovery reset is an immediate action, while the fields in this sheet are only drafts
   // until Save. Always reset to the persisted base, never to an unsaved number in a stepper.
   const persistedConfig = existing || c
+  const scopePreview = progressionScopePreview(
+    st,
+    { ...c, id: ex.id },
+    routine,
+    existing ? { ...existing, id: ex.id } : null
+  )
   const persistedActive = policyFor({ ...persistedConfig, id: ex.id }, routine, mode)
   const persistedDefaults = confirmedRepRangeConfig(persistedConfig, st.restSec)
   const hasSavedConfirmed = !!existing && persistedActive === 'confirmed_rep_range'
@@ -565,10 +581,10 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
   }
   const resetRest = () => confirmSheet({
     title: t('Reset recovery to {0}s?', persistedDefaults.restSeconds),
-    message: t('Recovery history is shared by exercise, so this reset applies to the exercise in every routine, subject to each configuration\'s maximum. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.'),
+    message: t('Recovery follows this progression. The reset also applies to another routine only when it shares the same progression. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.'),
     confirmText: t('Reset to {0}s', persistedDefaults.restSeconds),
     onConfirm: () => {
-      update(s => resetConfirmedRepRangeRest(s, ex.id, {
+      update(s => resetConfirmedRepRangeRest(s, { ...persistedConfig, id: ex.id }, {
         resetSeconds: persistedDefaults.restSeconds
       }))
       toast(t('Recovery reset to {0}s for the next workout.', persistedDefaults.restSeconds))
@@ -582,6 +598,23 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
           ...options.map(p => ({ value: p, label: t(POLICY_NAME[p]) }))]} />
     </div>
     <div className="small dim" style={{ marginBottom: active === 'off' ? 18 : 10 }}>{t(POLICY_DESC[active])}</div>
+    <ConfigGroup legend={t('Progression history')} className="cfg-progression-scope">
+      <div className="cfg-inline-preview" aria-live="polite">
+        <span>{t('Scope')}</span>
+        <strong>{t(scopePreview.shared ? 'Shared progression' : 'Independent progression')}</strong>
+      </div>
+      <p className="cfg-help">
+        {scopePreview.shared
+          ? t('Equivalent configurations in compatible routines use the same weight, target, streak and recovery history.')
+          : t('This configuration has its own future weight, target, streak and recovery history.')}
+      </p>
+      {scopePreview.shared && scopePreview.compatibleRoutines.length > 0 &&
+        <p className="cfg-help">{t('Shared with: {0}', scopePreview.compatibleRoutines.join(', '))}</p>}
+      <p className="cfg-help">{t('Changing a material setting separates future progression automatically; completed workouts are never rewritten.')}</p>
+      {scopePreview.separating && <p className="cfg-warning" role="status">
+        {t('Saving separates this progression from the next workout. It starts from the edited configuration and current working load; the shared completed history remains unchanged.')}
+      </p>}
+    </ConfigGroup>
     {active !== 'off' && active !== 'confirmed_rep_range' && <ConfigGroup
       legend={mode === 'time' ? t('Progression') : t('Load')} className="cfg-progression-group">
       <div className="cfg-grid">
@@ -1062,11 +1095,7 @@ export function beginWorkout(routineId, bw) {
   // The prescription is applied as the session is built, so you walk up to the bar with the
   // right weight already on the screen instead of being told about it afterwards. `plan` is
   // kept on the entry purely so the workout can explain the number it chose.
-  const entries = (r ? r.ex : []).map(cfg => {
-    const plan = nextPrescription(st, cfg, r)
-    const target = targetForPrescription(cfg, plan)
-    return { id: cfg.id, sg: cfg.sg, target, plan, sets: applyPrescription(buildSets(st, cfg), plan) }
-  })
+  const entries = (r ? r.ex : []).map(cfg => buildScopedWorkoutEntry(st, cfg, r))
   update(s => {
     s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
   })
@@ -1102,12 +1131,18 @@ function TopWeight({ entryIdx, close }) {
       s.active.entries[entryIdx].topW = n
       const cur = s.exWeights[entry.id]
       s.exWeights[entry.id] = { w: Math.max(n, cur ? cur.w : 0), d: todayISO() }
+      const progressionId = progressionIdOf(entry)
+      s.progressionWeights = s.progressionWeights || {}
+      s.progressionWeights[progressionId] = { w: n, d: todayISO() }
     })
     close()
     if (advance && unitDone) {
       if (isLastUnit) workoutCompleteSheet()               // whole workout done → finish/continue prompt
       else update(s => { s.active.cur = units[unitIdx + 1][0] })
-    } else toast(t('Tracked — next time starts at {0}', fmtLoad(S().exWeights[entry.id].w) + ' ' + st.unit))
+    } else {
+      const tracked = S().progressionWeights?.[progressionIdOf(entry)]?.w ?? n
+      toast(t('Tracked — next time starts at {0}', fmtLoad(tracked) + ' ' + st.unit))
+    }
   }
   return <>
     <h3 className="capitalize row" style={{ gap: 8 }}><Icon name="checkCircle" style={{ color: 'var(--acc)' }} />{t('{0} done', ex.n)}</h3>
@@ -1170,30 +1205,20 @@ function doFinishWorkout() {
   const st = S()
   const A = st.active
   if (!A) return
-  const prs = []
-  const e1prs = []
-  A.entries.forEach(e => {
-    const mx = Math.max(0, ...e.sets.filter(s => s.done).map(s => s.w))
-    if (mx > 0 && mx > bestWeightFor(st, e.id)) prs.push(e.id)
-    // A heavier estimate without a heavier top set is its own kind of progress —
-    // same weight for more reps. Reported separately so it can't be read as a load PR.
-    const rec = is1RMRecord(st, e.id, e)
-    if (rec && !prs.includes(e.id)) e1prs.push({ id: e.id, ...rec })
-  })
+  // Multiple routine slots may use the same catalog exercise. They retain independent
+  // progression snapshots, but contribute together to one global PR/e1RM achievement.
+  const { prs, e1prs } = recordsForWorkout(st, A.entries)
   const w = {
     id: A.id, d: A.d, start: A.start, end: Date.now(), routineId: A.routineId, name: A.name, bw: A.bw,
     // `target` (what the session prescribed) is kept alongside the sets: without it a
     // finished workout cannot say whether it hit its reps, and a timed session reads back
     // as "0 reps". It is what the progression engine works from.
-    entries: A.entries.map(e => ({ id: e.id, sets: e.sets, topW: e.topW || null, target: e.target || null })).filter(e => e.sets.some(s => s.done)),
+    entries: completedWorkoutEntries(A.entries),
     prs
   }
   w.vol = workoutVolume(w)
   update(s => {
-    w.entries.forEach(e => {
-      const mx = Math.max(0, ...e.sets.filter(x => x.done).map(x => x.w || 0), e.topW || 0)
-      if (mx > 0) { const cur = s.exWeights[e.id]; if (!cur || mx > cur.w) s.exWeights[e.id] = { w: mx, d: w.d } }
-    })
+    applyWorkoutWeights(s, w.entries, w.d)
     s.workouts.push(w)
     s.active = null
   })

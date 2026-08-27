@@ -12,6 +12,7 @@ import Icon from '../components/Icon.jsx'
 import BodyMap, { BodyMapLegend } from '../components/BodyMap.jsx'
 import { loadOfWorkouts, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
 import { e1rmSeries, best1RM } from '../lib/onerm.js'
+import { exerciseMetricPoint, latestExerciseEntry } from '../lib/exercise-stats.js'
 import {
   hasEffort, displayScale, scaleName, toScale, avgRir, effortSummary, effortWeeks,
   effortHistogram, isHardSet, HARD_RIR
@@ -152,13 +153,9 @@ export default function Stats() {
   // How this exercise was logged most recently decides what the curve means: top weight,
   // longest hold or top speed. Sets logged in another mode lack the field and score 0, so a
   // switched exercise drops its old points instead of mixing seconds into a weight chart.
-  const curMode = curEx ? (() => {
-    for (let i = S.workouts.length - 1; i >= 0; i--) {
-      const en = S.workouts[i].entries.find(e => e.id === curEx)
-      if (en) return modeOf({ ...(en.target || {}), id: curEx })
-    }
-    return modeOf({ id: curEx })
-  })() : 'reps'
+  const curMode = curEx
+    ? modeOf({ ...(latestExerciseEntry(S.workouts, curEx)?.target || {}), id: curEx })
+    : 'reps'
   const curCardio = curMode === 'cardio'
   const curTimed = curMode === 'time'
   const metric = s => curCardio ? (s.speed || 0) : curTimed ? (s.sec || 0) : (s.w || 0)
@@ -166,8 +163,14 @@ export default function Stats() {
   let exPts = [], exList = [], exBest = 0
   if (curEx) {
     S.workouts.forEach(w => {
-      const en = w.entries.find(e => e.id === curEx)
-      if (en) { const mx = Math.max(0, ...en.sets.filter(s => s.done).map(metric), curCardio || curTimed ? 0 : (en.topW || 0)); if (mx > 0) { exPts.push({ t: w.start, y: mx, d: w.d, sets: en.sets.filter(s => s.done), target: en.target }); if (mx > exBest) exBest = mx } }
+      const point = exerciseMetricPoint(w, curEx, metric, {
+        includeTopWeight: !curCardio && !curTimed,
+        entryFilter: entry => modeOf({ ...(entry.target || {}), id: curEx }) === curMode
+      })
+      if (point) {
+        exPts.push(point)
+        if (point.y > exBest) exBest = point.y
+      }
     })
     exList = exPts.slice(-5).reverse()
   }
@@ -242,7 +245,7 @@ export default function Stats() {
               : <LineChart points={onE1 ? e1Pts.map(p => ({ t: p.t, y: p.y, d: p.d })) : topPts} h={150} unit={onE1 ? S.unit : exUnit} color="var(--blue)" formatValue={formatExerciseMetric} />}
           </div>
           <div style={{ marginTop: 8 }}>{exList.map((p, i) => <div key={i} className="row between small" style={{ padding: '6px 0', borderBottom: 'var(--hair) solid var(--sep)' }}>
-            <span className="muted">{fmtDate(p.d, true)}</span><span>{p.sets.map(s => setLabel(curEx, s, p.target)).join('  ')}</span></div>)}</div>
+            <span className="muted">{fmtDate(p.d, true)}</span><span>{p.loggedSets.map(({ set, target }) => setLabel(curEx, set, target)).join('  ')}</span></div>)}</div>
           <div className="small dim" style={{ marginTop: 8 }}>
             {onEff ? t('Average effort per workout') : onE1 ? t('Estimated 1RM per workout') : curCardio ? t('Top speed per workout') : curTimed ? t('Longest hold per workout') : t('Best set weight per workout')}
             {onEff ? '' : <> · {t('Best:')}{' '}<b className="accent">{formatExerciseMetric(onE1 ? e1Best.est : exBest)} {onE1 ? S.unit : exUnit}</b></>}

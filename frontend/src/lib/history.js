@@ -2,6 +2,7 @@
 import { todayISO, isoOf, weekKey, fmtLoad, fmtNum } from './format.js'
 import { isCardio, isBodyweightEq } from './exercises.js'
 import { t } from './i18n.js'
+import { findWorkoutProgressionEntry, progressionIdOf } from './progression-scope.js'
 
 // How an exercise is logged (issue #16). This used to be derived from the body part alone,
 // which meant a plank or a farmer's carry could only be timed by filing it under cardio.
@@ -163,13 +164,19 @@ export function cleanupSg(ex) {
   })
 }
 
-export function lastEntryFor(S, exId) {
+export function lastEntryFor(S, exId, scope) {
+  const progressionId = typeof scope === 'string' ? scope : scope?.progressionId
   for (let i = S.workouts.length - 1; i >= 0; i--) {
-    const en = S.workouts[i].entries.find(e => e.id === exId)
+    const en = findWorkoutProgressionEntry(S, S.workouts[i], exId, progressionId)
     // `target` is what the session prescribed; finished workouts carry it so labels and the
     // progression engine can read a session back the way it was logged. Older workouts have
     // none — modeOf() falls back to the body part for them, which is what they were.
-    if (en && en.sets.some(s => s.done)) return { d: S.workouts[i].d, sets: en.sets.filter(s => s.done), target: en.target || null }
+    if (en && en.sets.some(s => s.done)) return {
+      d: S.workouts[i].d,
+      sets: en.sets.filter(s => s.done),
+      target: en.target || null,
+      progressionId: en.progressionId || null
+    }
   }
   return null
 }
@@ -195,7 +202,7 @@ export function effectiveRoutine(S, iso) {
   return id ? S.routines.find(r => r.id === id) || null : null
 }
 export function buildSets(S, cfg) {
-  const last = lastEntryFor(S, cfg.id)
+  const last = lastEntryFor(S, cfg.id, cfg)
   const n = Math.max(1, cfg.sets || 1)
   const mode = modeOf(cfg)
   const sets = []
@@ -219,7 +226,13 @@ export function buildSets(S, cfg) {
     }
     return sets
   }
-  const conf = S.exWeights[cfg.id]
+  const progressionId = cfg.progressionId ? progressionIdOf(cfg) : null
+  // A scoped working weight is operational state. `exWeights` remains the exercise-wide PR and
+  // is consulted only by legacy/unscoped callers; using it here for a new isolated slot would
+  // leak another routine's heaviest load back into this prescription.
+  const conf = progressionId
+    ? S.progressionWeights?.[progressionId]
+    : S.exWeights[cfg.id]
   for (let i = 0; i < n; i++) {
     const prev = prevAt(i)
     const usable = prev && prev.r > 0 ? prev : null

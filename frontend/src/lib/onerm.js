@@ -51,14 +51,27 @@ export function bestSetOf(entry, formula = DEFAULT_FORMULA) {
   return best
 }
 
+// Best estimate across every occurrence of the same exercise in one workout. A routine may
+// legitimately contain the exercise more than once (for example, a heavy block followed by
+// back-off work): those are separate progression instances, but they are one global exercise
+// for statistics. Keeping this aggregation here also makes the finish summary use the exact
+// same definition as the e1RM chart.
+export function bestSetOfEntries(entries, formula = DEFAULT_FORMULA) {
+  let best = null
+  ;(entries || []).forEach(entry => {
+    const candidate = bestSetOf(entry, formula)
+    if (candidate && (!best || candidate.est > best.est)) best = candidate
+  })
+  return best
+}
+
 // One point per workout in which the exercise produced an estimate — feeds the trend chart.
 // Chronological, matching the order workouts are appended in.
 export function e1rmSeries(S, exId, formula = DEFAULT_FORMULA) {
   const pts = []
   ;(S.workouts || []).forEach(w => {
-    const entry = w.entries.find(e => e.id === exId)
-    if (!entry) return
-    const best = bestSetOf(entry, formula)
+    const entries = (w.entries || []).filter(e => e.id === exId)
+    const best = bestSetOfEntries(entries, formula)
     if (best) pts.push({ t: w.start, d: w.d, y: best.est, w: best.w, r: best.r })
   })
   return pts
@@ -75,7 +88,13 @@ export function best1RM(S, exId, formula = DEFAULT_FORMULA) {
 // Did this workout beat every estimate that came before it? Used for the finish summary,
 // so it compares against history that does not yet contain `w`.
 export function is1RMRecord(S, exId, entry, formula = DEFAULT_FORMULA) {
-  const now = bestSetOf(entry, formula)
+  return is1RMRecordForEntries(S, exId, [entry], formula)
+}
+
+// Workout-level counterpart of is1RMRecord. It deliberately returns at most one record for
+// an exercise even when that exercise appears in multiple routine slots.
+export function is1RMRecordForEntries(S, exId, entries, formula = DEFAULT_FORMULA) {
+  const now = bestSetOfEntries(entries, formula)
   if (!now) return null
   const prev = best1RM(S, exId, formula)
   return !prev || now.est > prev.est ? { ...now, prev: prev ? prev.est : 0 } : null

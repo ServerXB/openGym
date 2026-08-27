@@ -31,7 +31,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 3 | Esporre e documentare API | Esistono endpoint interni, non una API pubblica sicura/versionata | P2 | Grande |
 | 4 | Scorrere tra routine | Navigazione attuale richiede ritorno alla lista | P1 | Media |
 | 5 | Auto-riduzione recupero attiva di default | Fattibile, ma solo sulle nuove selezioni | P1 | Piccola |
-| 6 | Istanze dello stesso esercizio | Problema confermato: lo scope attuale è globale per `exerciseId` | P0 | Grande |
+| 6 | Istanze dello stesso esercizio | Implementato e validato: slot stabili, gruppi compatibili, snapshot e reader legacy | P0 | Grande |
 | 7 | Calcolo attrezzatura/piastre | Nuova epic; il catalogo non contiene abbastanza informazioni | P2 | Grande |
 | 8 | Peso da Withings | Fattibile in lettura; OAuth/polling server-side | P3 | Grande |
 | 9 | Dati Polar Flow | Fattibile solo come arricchimento in lettura | P3 | Grande |
@@ -390,6 +390,21 @@ Regole:
 - quattro successi, decremento di 30 secondi e limite base invariati.
 
 ### 5.6 Istanze dello stesso esercizio tra routine
+
+#### Stato implementazione — 2026-08-27
+
+Implementato e coperto da test automatici. La decisione UX finale applica la regola confermata
+dall'utente: configurazioni equivalenti in routine diverse condividono automaticamente; una
+differenza materiale separa la progressione futura; i duplicati nella stessa routine restano
+indipendenti. La scheda mostra sempre lo stato effettivo `Progressione condivisa` oppure
+`Progressione indipendente`, le routine compatibili e un avviso prima di un fork.
+
+Non viene eseguito un merge automatico di due gruppi che possiedono già storici divergenti:
+scegliere implicitamente quale storico mantenere sarebbe distruttivo e non spiegabile. Un fork
+parte dalla configurazione modificata e dal carico operativo corrente, non riscrive i workout
+completati e non legge le future sessioni dell'altro ramo.
+
+Dettagli, comandi e risultati sono registrati in `OPEN_GYM_RELEASE_TEST_REPORT.md`.
 
 #### Esito: problema confermato
 

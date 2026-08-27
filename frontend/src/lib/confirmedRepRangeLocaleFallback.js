@@ -2,6 +2,15 @@
 // dictionaries deliberately share the same key set (checked by scripts/check-locales.mjs),
 // so untranslated languages carry an explicit English fallback until native copy is added.
 const KEYS = [
+  'Progression history',
+  'Scope',
+  'Shared progression',
+  'Independent progression',
+  'Equivalent configurations in compatible routines use the same weight, target, streak and recovery history.',
+  'This configuration has its own future weight, target, streak and recovery history.',
+  'Shared with: {0}',
+  'Changing a material setting separates future progression automatically; completed workouts are never rewritten.',
+  'Saving separates this progression from the next workout. It starts from the edited configuration and current working load; the shared completed history remains unchanged.',
   'Confirmed Rep-Range',
   'Add one rep after a clean session. At the top, confirm twice before adding weight; later-set misses add recovery time.',
   'Minimum reps',
@@ -44,6 +53,7 @@ const KEYS = [
   'Reset to {0}s',
   'Recovery is already at the initial value',
   'Recovery history is shared by exercise, so this reset applies to the exercise in every routine, subject to each configuration\'s maximum. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.',
+  'Recovery follows this progression. The reset also applies to another routine only when it shares the same progression. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.',
   'Recovery reset to {0}s for the next workout.',
   'Changing the initial recovery takes effect after Save and does not reset the effective recovery.',
   'Recovery manually reset to {0}s for the next workout.',

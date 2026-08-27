@@ -25,6 +25,7 @@ import {
   CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES,
   confirmedRestAutoReduction
 } from './confirmedRepRangeAutoRest.js'
+import { findWorkoutProgressionEntry } from './progression-scope.js'
 
 export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'confirmed_rep_range', 'time']
 
@@ -184,8 +185,9 @@ export function readSession(entry, fallback) {
 /** Every past session for one exercise, oldest first. `fallback` — see readSession. */
 export function sessionsFor(S, exId, fallback) {
   const out = []
+  const progressionId = fallback?.progressionId
   ;(S.workouts || []).forEach(w => {
-    const entry = w.entries.find(e => e.id === exId)
+    const entry = findWorkoutProgressionEntry(S, w, exId, progressionId)
     if (entry && entry.sets.some(s => s.done)) out.push({ d: w.d, ...readSession(entry, fallback) })
   })
   return out
@@ -235,8 +237,9 @@ export function confirmedRepRangeSession(entry, fallback) {
 
 function confirmedSessionsFor(S, exId, fallback) {
   const out = []
+  const progressionId = fallback?.progressionId
   ;(S.workouts || []).forEach(w => {
-    const entry = (w.entries || []).find(e => e.id === exId)
+    const entry = findWorkoutProgressionEntry(S, w, exId, progressionId)
     // Do not turn workouts logged under Linear/Double into confirmation history when a user
     // switches strategy. New entries snapshot the effective policy, including routine-level
     // inheritance, so only this strategy's own sessions participate.
@@ -363,7 +366,7 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const maxRest = normalized.maxRestSeconds
   const sessions = confirmedSessionsFor(S, cfg.id, cfg)
   const last = sessions[sessions.length - 1]
-  const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg.id), initialRest, maxRest)
+  const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg), initialRest, maxRest)
   if (!last) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, null)
     // "First Confirmed" means no history for this policy, not necessarily no history for the
