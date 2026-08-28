@@ -3,9 +3,9 @@
 - Data: 2026-08-26
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Stato: Release A implementata e validata; release successive pianificate
+- Stato: Release A implementata e validata; Release B requisito 1 implementato e validato
 - Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: implementata la validazione del livello effettivamente completato (`RF-11.1`)
+- Ultimo aggiornamento funzionale: completata la distinzione fra corpo libero puro e zavorrato
 - Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
 
 ## 1. Obiettivo
@@ -26,7 +26,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 
 | ID | Requisito | Riscontro | Priorità | Dimensione |
 |---|---|---|---|---|
-| 1 | Nascondere peso nel corpo libero | Difetto UI confermato, soprattutto Time e Confirmed | P1 | Media |
+| 1 | Nascondere peso nel corpo libero | Implementato e validato: tre modalità di carico, zero-load invariants e disclosure zavorra | P1 | Media |
 | 2 | Sincronizzare timer e orologio | Timer locale già basato su deadline; controllo smartwatch richiede fondazione e companion | P2 | Grande/Epic |
 | 3 | Esporre e documentare API | Esistono endpoint interni, non una API pubblica sicura/versionata | P2 | Grande |
 | 4 | Scorrere tra routine | Navigazione attuale richiede ritorno alla lista | P1 | Media |
@@ -105,43 +105,42 @@ allenamento Polar non deve essere interpretato come prova di serie, ripetizioni 
 
 ### 5.1 Corpo libero: non mostrare il peso
 
-#### Stato attuale
+#### Stato dell'implementazione
 
-- In modalità Reps ordinaria il campo `Peso` principale è nascosto, ma appare subito `Peso
-  aggiunto`.
-- In modalità Time il campo `Peso` resta visibile anche con corpo libero e può essere duplicato
-  dalla riga `Peso aggiunto`.
-- In Confirmed Rep-Range il gruppo `Carico` viene sempre mostrato.
-- Durante il workout il caso corpo libero puro è già gestito meglio: se le serie hanno peso zero,
-  la colonna peso e la conferma del working weight non appaiono.
+Implementato nella Release B con commit e gate dedicati documentati in
+`OPEN_GYM_RELEASE_TEST_REPORT.md`.
 
-Riferimenti principali: `frontend/src/sheets.jsx:602-626`, `frontend/src/sheets.jsx:760-814`,
-`frontend/src/views/Workout.jsx:74-94` e `frontend/src/views/Workout.jsx:227-231`.
+La modalità di carico è derivata senza nuovi campi persistenti:
 
-Nascondere soltanto il JSX non è sufficiente. `buildSets` può recuperare un vecchio carico da
-`exWeights` o dallo storico; il risultato sarebbe un peso prescritto ma invisibile.
+- `external`: esercizio non a corpo libero;
+- `pure_bodyweight`: corpo libero con `weight <= 0`;
+- `added_bodyweight`: corpo libero con `weight > 0`.
 
-#### Decisione raccomandata
-
-Distinguere esplicitamente tre modalità:
-
-1. carico esterno;
-2. corpo libero puro;
-3. corpo libero con zavorra.
+Il target congelato del workout è autoritativo quando contiene `weight`, compreso lo zero. Gli
+snapshot più vecchi privi del campo possono riconoscere una zavorra soltanto da serie completate
+con peso positivo. Non sono richieste migrazioni e i workout terminati non vengono modificati.
 
 Per il corpo libero puro:
 
-- nessun campo peso in Reps, Time o Confirmed;
-- `weight` e ogni set nuovo vengono forzati a zero;
-- nessun best weight e nessuna conferma peso;
-- Confirmed progredisce in ripetizioni e serie fino al limite già previsto;
-- nessun consiglio di piastre.
+- Reps, Time e Confirmed non mostrano campi peso;
+- configurazione, target e nuove serie forzano il peso a zero;
+- storico, `exWeights` e `progressionWeights` incompatibili non vengono riutilizzati;
+- PR, badge Best e conferma top weight ignorano difensivamente carichi anomali nascosti;
+- l'incremento di carico non è persistito né usato per separare scope equivalenti;
+- l'incremento Time resta disponibile perché rappresenta secondi, non chilogrammi;
+- Confirmed continua a progredire in ripetizioni e serie fino al limite esistente.
 
-La zavorra deve stare dietro un'azione esplicita, ad esempio `Aggiungi zavorra`. Solo dopo quella
-scelta appare `Peso aggiunto`. Le configurazioni legacy con `bodyweight: true` e `weight > 0`
-vengono lette come corpo libero con zavorra.
+La zavorra è dietro l'azione esplicita `Aggiungi zavorra`. L'azione apre un unico campo `Peso
+aggiunto`; `Rimuovi zavorra` azzera il draft e torna alla modalità pura. Le configurazioni legacy
+con `bodyweight: true` e peso positivo restano zavorrate e seguono la normale progressione di
+carico.
 
-#### Scenari di accettazione
+Riferimenti principali: `frontend/src/lib/exercise-load-mode.js`, `frontend/src/lib/history.js`,
+`frontend/src/lib/progression.js`, `frontend/src/lib/workout-prescription.js`,
+`frontend/src/lib/workout-records.js`, `frontend/src/sheets.jsx` e
+`frontend/src/views/Workout.jsx`.
+
+#### Scenari di accettazione validati
 
 | Scenario | Risultato atteso |
 |---|---|
@@ -155,12 +154,13 @@ vengono lette come corpo libero con zavorra.
 
 #### Test necessari
 
-- rendering Reps, Time e Confirmed;
-- assenza della duplicazione Time;
-- storico/exWeights non riutilizzati nel corpo libero puro;
-- passaggi fra le tre modalità;
-- refresh, import/export e workout snapshot;
-- non regressione bodyweight per-side e progressione serie.
+- helper e compatibilità: built-in/custom, override espliciti, snapshot completi e legacy;
+- Reps, Time e Confirmed, inclusi strategia ereditata e progressione serie;
+- storico, mappe operative, PR e top weight;
+- passaggi fra le tre modalità e protezione del valore aggiunto configurato;
+- target/serie a peso zero anche contro piani o righe anomali;
+- scope condivisi/indipendenti, import/export piano e immutabilità JSON;
+- build produzione e sincronizzazione delle undici lingue.
 
 ### 5.2 Sincronizzazione timer orologio/openGym
 
@@ -1172,7 +1172,7 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 
 #### Release B — Esperienza quotidiana
 
-1. Corpo libero puro/zavorrato.
+1. Corpo libero puro/zavorrato — completato e validato.
 2. Default auto-riduzione sulle sole nuove selezioni Confirmed.
 3. Orari start/end.
 4. Timer locale persistente.
@@ -1214,8 +1214,8 @@ Il primo sviluppo da autorizzare è soltanto la **Release A**. Al termine devono
   soltanto la prescrizione futura;
 - evidenza della nuova prescrizione futura derivata dallo storico reale.
 
-Solo dopo la validazione della Release A partirei con la Release B. In questo modo un problema nel
-nuovo calcolo non viene mascherato da molte modifiche UI contemporanee.
+La Release A è stata validata prima di avviare la Release B. Questa sequenza mantiene isolati gli
+eventuali problemi del calcolo da quelli introdotti dalle successive modifiche UI.
 
 ## 8. Piano di sviluppo consigliato
 

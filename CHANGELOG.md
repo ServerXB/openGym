@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Pure bodyweight and added weight are now explicit.** Reps, timed holds and Confirmed
+  Rep-Range hide load controls when no external load is configured; `Add weight` reveals a
+  dedicated field, while future pure-bodyweight sets are protected from stale historical loads.
 - **Confirmed Rep-Range configuration is deterministic.** The first session and every session
   after a load increase start at the minimum of the configured rep range; the redundant
   configurable first-session target is no longer shown or exported.

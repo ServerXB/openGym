@@ -74,6 +74,26 @@ describe('recordsForWorkout', () => {
 
     expect(result.prs).toEqual(['bench'])
   })
+
+  it('does not turn a stale hidden load in a pure bodyweight snapshot into a record', () => {
+    const result = recordsForWorkout({ workouts: [] }, [{
+      id: 'bench',
+      target: { bodyweight: true, weight: 0, sets: 1 },
+      sets: [{ w: 50, r: 10, done: true }]
+    }])
+
+    expect(result).toEqual({ prs: [], e1prs: [] })
+  })
+
+  it('keeps an explicitly added bodyweight load eligible for the global record', () => {
+    const result = recordsForWorkout({ workouts: [] }, [{
+      id: 'bench',
+      target: { bodyweight: true, weight: 10, sets: 1 },
+      sets: [{ w: 10, r: 8, done: true }]
+    }])
+
+    expect(result.prs).toEqual(['bench'])
+  })
 })
 
 describe('global PR and scoped operational weights', () => {
@@ -218,5 +238,41 @@ describe('global PR and scoped operational weights', () => {
 
     expect(state.exWeights.bench).toEqual({ w: 95, d: '2026-08-27' })
     expect(state.progressionWeights['pg-linear']).toEqual({ w: 95, d: '2026-08-27' })
+  })
+
+  it('defensively ignores every operational load source for pure bodyweight', () => {
+    const previousGlobal = { w: 30, d: '2026-08-01' }
+    const previousScoped = { w: 20, d: '2026-08-01' }
+    const state = {
+      exWeights: { bench: previousGlobal },
+      progressionWeights: { 'pg-bodyweight': previousScoped }
+    }
+    const entry = {
+      id: 'bench', progressionId: 'pg-bodyweight',
+      target: { bodyweight: true, weight: 0, prog: 'linear', sets: 1 },
+      sets: [{ w: 50, r: 10, done: true }]
+    }
+
+    expect(progressionWorkingWeight(entry)).toBeNull()
+    expect(applyActiveTopWeight(state, entry, 60, '2026-08-27')).toBe(false)
+    expect(entry).not.toHaveProperty('topW')
+    applyWorkoutWeights(state, [entry], '2026-08-27')
+
+    expect(state.exWeights.bench).toBe(previousGlobal)
+    expect(state.progressionWeights['pg-bodyweight']).toBe(previousScoped)
+  })
+
+  it('keeps added bodyweight load on the normal operational path', () => {
+    const state = {}
+    const entry = {
+      id: 'bench', progressionId: 'pg-belt',
+      target: { bodyweight: true, weight: 10, prog: 'linear', sets: 1 },
+      sets: [{ w: 10, r: 8, done: true }]
+    }
+
+    expect(progressionWorkingWeight(entry)).toBe(10)
+    applyWorkoutWeights(state, [entry], '2026-08-27')
+    expect(state.exWeights.bench).toEqual({ w: 10, d: '2026-08-27' })
+    expect(state.progressionWeights['pg-belt']).toEqual({ w: 10, d: '2026-08-27' })
   })
 })

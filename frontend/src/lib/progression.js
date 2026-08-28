@@ -26,6 +26,13 @@ import {
   confirmedRestAutoReduction
 } from './confirmedRepRangeAutoRest.js'
 import { findWorkoutProgressionEntry } from './progression-scope.js'
+import {
+  LOAD_MODE,
+  entryMatchesExerciseLoadMode,
+  exerciseLoadMode,
+  isPureBodyweight,
+  workoutEntryLoadMode
+} from './exercise-load-mode.js'
 
 export const POLICIES = ['off', 'linear', 'greyskull', 'double', 'confirmed_rep_range', 'time']
 
@@ -188,7 +195,13 @@ export function sessionsFor(S, exId, fallback) {
   const progressionId = fallback?.progressionId
   ;(S.workouts || []).forEach(w => {
     const entry = findWorkoutProgressionEntry(S, w, exId, progressionId)
-    if (entry && entry.sets.some(s => s.done)) out.push({ d: w.d, ...readSession(entry, fallback) })
+    // A load-mode change is a future prescription boundary. A pure push-up must not inherit
+    // the load, stalls or target of a weighted dip-belt block (and vice versa), while callers
+    // without a current config retain the legacy all-history reader.
+    if (entry && entry.sets.some(s => s.done)
+      && (!fallback || entryMatchesExerciseLoadMode(entry, fallback))) {
+      out.push({ d: w.d, ...readSession(entry, fallback) })
+    }
   })
   return out
 }
@@ -240,6 +253,7 @@ const sameLoad = (a, b) => a != null && b != null && Math.abs(a - b) < 1e-8
 export function confirmedRepRangeSession(entry, fallback) {
   const snapshot = entry?.target || null
   const target = snapshot || {}
+  const loadMode = workoutEntryLoadMode(entry)
   const rows = Array.isArray(entry?.sets) ? entry.sets : []
   const snapshotPlanned = snapshotPositiveInt(target.sets)
   const planned = snapshotPlanned || Math.max(1, rows.length || 1)
@@ -251,10 +265,14 @@ export function confirmedRepRangeSession(entry, fallback) {
     && prescribed.length === planned
     && prescribed.every(set => !!set?.done)
   const reps = complete ? prescribed.map(set => Math.max(0, Number(set.r) || 0)) : []
-  const loads = complete ? prescribed.map(set => snapshotLoad(set.w)) : []
+  // The frozen target owns the semantic mode. A malformed/invisible positive `w` in a modern
+  // pure-bodyweight entry is ignored rather than silently turning that history into zavorra.
+  const loads = complete
+    ? prescribed.map(set => loadMode === LOAD_MODE.PURE_BODYWEIGHT ? 0 : snapshotLoad(set.w))
+    : []
   const loadKnown = complete && loads.every(load => load != null)
   const loadUniform = loadKnown && loads.every(load => sameLoad(load, loads[0]))
-  const prescribedWeight = snapshotLoad(target.weight)
+  const prescribedWeight = loadMode === LOAD_MODE.PURE_BODYWEIGHT ? 0 : snapshotLoad(target.weight)
   const workingWeight = loadUniform ? loads[0] : null
   const minCompletedReps = reps.length ? Math.min(...reps) : null
   const firstHit = goal != null && !!prescribed[0]?.done && (Number(prescribed[0].r) || 0) >= goal
@@ -301,8 +319,9 @@ export function confirmedRepRangeSession(entry, fallback) {
     rangeMax: range?.maxReps ?? null,
     rangeStep: range?.step ?? null,
     rangeKey: range?.key ?? null,
+    loadMode,
     setBaselineId,
-    progressionKey: range ? `${range.key}|sets:${setBaselineId || 'legacy'}` : null,
+    progressionKey: range ? `${range.key}|sets:${setBaselineId || 'legacy'}|load:${loadMode}` : null,
     loadUniform,
     workingWeight,
     prescribedWeight,
@@ -338,7 +357,10 @@ function confirmedSessionsFor(S, exId, fallback) {
     // Completed workouts retain Confirmed entries even when every prescribed row was skipped:
     // that is an incomplete exposure and must break a top-range confirmation streak. Active
     // workouts never reach this reader because only S.workouts is traversed here.
-    if (entry?.target?.prog === 'confirmed_rep_range') out.push(confirmedRepRangeSession(entry, fallback))
+    if (entry?.target?.prog === 'confirmed_rep_range'
+      && entryMatchesExerciseLoadMode(entry, fallback)) {
+      out.push(confirmedRepRangeSession(entry, fallback))
+    }
   })
   return out
 }
@@ -349,11 +371,13 @@ function confirmedSessionsFor(S, exId, fallback) {
 // become the next prescription. Other reps policies keep their established max-load reading
 // when they provide the baseline for a first switch to Confirmed.
 function confirmedOperationalHistoryWeight(S, cfg) {
+  if (isPureBodyweight(cfg)) return 0
   let weight = null
   const progressionId = cfg?.progressionId
   ;(S.workouts || []).forEach(workout => {
     const entry = findWorkoutProgressionEntry(S, workout, cfg.id, progressionId)
-    if (!entry?.sets?.some(set => set?.done)) return
+    if (!entry?.sets?.some(set => set?.done)
+      || !entryMatchesExerciseLoadMode(entry, cfg)) return
 
     if (entry.target?.prog === 'confirmed_rep_range') {
       const session = confirmedRepRangeSession(entry, cfg)
@@ -367,6 +391,21 @@ function confirmedOperationalHistoryWeight(S, cfg) {
     if (session.mode === 'reps') weight = snapshotLoad(session.weight)
   })
   return weight
+}
+
+// Operational maps predate load-mode metadata. Trust one for Confirmed only when the latest
+// completed entry in the same scope is compatible reps work. A brand-new external exercise
+// retains the established map fallback; an explicit added-bodyweight configuration instead
+// starts from its configured value when it has no matching history yet.
+function confirmedTrackedWeightIsCompatible(S, cfg) {
+  const progressionId = cfg?.progressionId
+  for (let i = (S.workouts || []).length - 1; i >= 0; i--) {
+    const entry = findWorkoutProgressionEntry(S, S.workouts[i], cfg.id, progressionId)
+    if (!entry?.sets?.some(set => set?.done)) continue
+    return entryMatchesExerciseLoadMode(entry, cfg)
+      && modeOf({ ...(entry.target || {}), id: entry.id }) === 'reps'
+  }
+  return exerciseLoadMode(cfg) === LOAD_MODE.EXTERNAL
 }
 
 // Recovery has its own history boundary. A manual reset opens a new epoch without changing
@@ -491,7 +530,9 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const rangeStep = repStep({ ...cfg, ...normalized })
   const currentRangeKey = `${minReps}:${maxReps}:${rangeStep}`
   const currentSetBaselineId = snapshotId(cfg.setBaselineId)
-  const currentProgressionKey = `${currentRangeKey}|sets:${currentSetBaselineId || 'legacy'}`
+  const currentLoadMode = exerciseLoadMode(cfg)
+  const pureBodyweight = currentLoadMode === LOAD_MODE.PURE_BODYWEIGHT
+  const currentProgressionKey = `${currentRangeKey}|sets:${currentSetBaselineId || 'legacy'}|load:${currentLoadMode}`
   const inc = loadIncrementFor(cfg, unit)
   const initialRest = normalized.restSeconds
   const maxRest = normalized.maxRestSeconds
@@ -499,7 +540,9 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const latest = sessions[sessions.length - 1]
   const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg), initialRest, maxRest)
   const rangePlan = {
-    policy: 'confirmed_rep_range', inc, minReps, maxReps, rangeStep,
+    policy: 'confirmed_rep_range',
+    ...(!pureBodyweight ? { inc } : {}),
+    minReps, maxReps, rangeStep,
     ...(currentSetBaselineId ? { setBaselineId: currentSetBaselineId } : {})
   }
 
@@ -517,10 +560,10 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const last = progressionSessions[progressionSessions.length - 1]
 
   const historyWeight = confirmedOperationalHistoryWeight(S, cfg)
-  const trackedWeight = cfg.progressionId
+  const trackedWeight = cfg.progressionId && confirmedTrackedWeightIsCompatible(S, cfg)
     ? snapshotLoad(S.progressionWeights?.[cfg.progressionId]?.w)
     : null
-  const operationalWeight = historyWeight ?? trackedWeight
+  const operationalWeight = pureBodyweight ? 0 : historyWeight ?? trackedWeight
 
   if (!last) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, latest)
@@ -539,11 +582,13 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   }
 
   const target = Math.min(maxReps, Math.max(minReps, last.goal || minReps))
-  const effectiveWeight = last.workingWeight
-    ?? last.prescribedWeight
-    ?? operationalWeight
-    ?? snapshotLoad(cfg.weight)
-    ?? 0
+  const effectiveWeight = pureBodyweight
+    ? 0
+    : last.workingWeight
+      ?? last.prescribedWeight
+      ?? operationalWeight
+      ?? snapshotLoad(cfg.weight)
+      ?? 0
   // Set-count progression on unloaded work is historical state just like the rep target.
   // Once a completed Confirmed cycle adds a set, every following prescription must carry it
   // until another completed cycle adds the next one; falling back to cfg.sets here would make
@@ -664,6 +709,7 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
 export function nextPrescription(S, cfg, routine) {
   const mode = modeOf(cfg)
   const policy = policyFor(cfg, routine, mode)
+  const pureBodyweight = isPureBodyweight(cfg)
   const unit = S.unit || 'kg'
   const configuredTimeIncrement = Number(cfg.inc)
   const inc = mode === 'time'
@@ -671,14 +717,19 @@ export function nextPrescription(S, cfg, routine) {
     : loadIncrementFor(cfg, unit)
   // Even with automatic progression disabled, a reps workout needs the resolved load step for
   // its manual +/- controls and snapshot. Time/cardio modes have no load increment semantics.
-  if (policy === 'off') return { policy, kind: 'off', ...(mode === 'reps' ? { inc } : {}) }
+  if (policy === 'off') return {
+    policy,
+    kind: 'off',
+    ...(mode === 'reps' && !pureBodyweight ? { inc } : {})
+  }
   if (policy === 'confirmed_rep_range') return confirmedRepRangeProgression(S, cfg, unit)
 
   const sessions = sessionsFor(S, cfg.id, cfg).filter(s => s.mode === mode)
   const last = sessions[sessions.length - 1]
   if (!last) return {
     policy, kind: 'first',
-    ...(mode === 'reps' ? { inc } : {}),
+    ...(pureBodyweight ? { weight: 0 } : {}),
+    ...(mode === 'reps' && !pureBodyweight ? { inc } : {}),
     why: ['Nothing logged yet — this session sets the baseline.']
   }
 
@@ -697,18 +748,18 @@ export function nextPrescription(S, cfg, routine) {
     return { policy, kind: 'hold', sec: last.goal || cfg.sec, why: ['Last time came up short — same target again.'] }
   }
 
-  const w = last.weight
-  // Bodyweight work carries no external load, so there is nothing to add or take away —
-  // "deload your push-ups to 2.5 kg" is not advice. Progress in reps instead. This runs ahead
-  // of the individual policies because it is true for all of them. Note the trigger is the
-  // *logged* weight, not the `bw` flag: a dip done with a belt has a load to progress and
-  // belongs on the normal policies, and a barbell lift logged at 0 has nothing to add to.
-  if (w <= 0) {
+  const w = pureBodyweight ? 0 : last.weight
+  // Pure bodyweight work carries no external load, so there is nothing to add or take away —
+  // "deload your push-ups to 2.5 kg" is not advice. Progress in reps instead. Explicit added
+  // load follows the normal weight policies; the `w <= 0` fallback preserves the historical
+  // behavior for unloaded external exercises and legacy entries without a reliable mode.
+  if (pureBodyweight || w <= 0) {
     const goal = last.goal || cfg.reps || 0
     const configuredSets = Math.max(1, cfg.sets || 1)
     const bodyweightSets = Math.max(configuredSets, last.planned || last.count || 1)
     const carriedSets = bodyweightSets > configuredSets ? { sets: bodyweightSets } : {}
-    if (!last.ok || goal <= 0) return { policy, kind: 'hold', weight: 0, inc, reps: goal || undefined, ...carriedSets, why: ['Bodyweight — same target again until every set is clean.'] }
+    const loadStep = pureBodyweight ? {} : { inc }
+    if (!last.ok || goal <= 0) return { policy, kind: 'hold', weight: 0, ...loadStep, reps: goal || undefined, ...carriedSets, why: ['Bodyweight — same target again until every set is clean.'] }
     // A ceiling turns "+1 rep forever" into a plan (issue #33). Past the top of the range the
     // reps go back to the bottom and a set is added instead, which is how bodyweight work
     // actually progresses once a set of 30 push-ups stops being a strength stimulus.
@@ -716,14 +767,14 @@ export function nextPrescription(S, cfg, routine) {
     if (top > 0 && goal >= top) {
       const sets = bodyweightSets + 1
       const bottom = Math.max(1, Math.min(cfg.reps || top, top))
-      if (sets <= MAX_BW_SETS) return { policy, kind: 'up', weight: 0, inc, reps: bottom, sets, why: ['{0} reps in every set — add a set and go back to {1}.', goal, bottom] }
+      if (sets <= MAX_BW_SETS) return { policy, kind: 'up', weight: 0, ...loadStep, reps: bottom, sets, why: ['{0} reps in every set — add a set and go back to {1}.', goal, bottom] }
       // Out of sets worth adding: more volume is no longer the answer, load or a harder
       // variation is — and that is a decision for a person, not a policy.
-      return { policy, kind: 'hold', weight: 0, inc, reps: goal, ...carriedSets, why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, goal] }
+      return { policy, kind: 'hold', weight: 0, ...loadStep, reps: goal, ...carriedSets, why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, goal] }
     }
     // Unilateral work steps by two, so the total stays even and both sides get the rep.
     const next = goal + repStep(cfg)
-    return { policy, kind: 'up', weight: 0, inc, reps: next, ...carriedSets, why: ['Bodyweight — every rep last time, so go for {0} this time.', next] }
+    return { policy, kind: 'up', weight: 0, ...loadStep, reps: next, ...carriedSets, why: ['Bodyweight — every rep last time, so go for {0} this time.', next] }
   }
   if (policy === 'double') {
     const top = cfg.reps || last.goal || 10

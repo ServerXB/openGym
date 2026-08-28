@@ -1,4 +1,5 @@
 import { bestWeightFor } from './history.js'
+import { LOAD_MODE, workoutEntryLoadMode } from './exercise-load-mode.js'
 import { is1RMRecordForEntries } from './onerm.js'
 import { progressionIdOf, routineExerciseIdOf } from './progression-scope.js'
 
@@ -51,6 +52,9 @@ export function recordsForWorkout(S, entries) {
   const byExercise = new Map()
   ;(entries || []).forEach(entry => {
     if (!entry?.id) return
+    // A modern pure-bodyweight snapshot owns its zero-load semantics even if malformed rows
+    // contain a stale positive `w`. Such a hidden value is neither a load PR nor e1RM evidence.
+    if (workoutEntryLoadMode(entry) === LOAD_MODE.PURE_BODYWEIGHT) return
     const group = byExercise.get(entry.id) || []
     group.push(entry)
     byExercise.set(entry.id, group)
@@ -87,6 +91,7 @@ export function recordsForWorkout(S, entries) {
  * `null` means that the entry cannot update its scoped progression baseline.
  */
 export function progressionWorkingWeight(entry) {
+  if (workoutEntryLoadMode(entry) === LOAD_MODE.PURE_BODYWEIGHT) return null
   if (entry?.target?.prog !== 'confirmed_rep_range') {
     const working = Math.max(
       0,
@@ -116,6 +121,7 @@ export function progressionWorkingWeight(entry) {
 export function applyActiveTopWeight(S, entry, weight, date) {
   const n = Number(weight)
   if (!entry || !Number.isFinite(n) || n < 0) return false
+  if (workoutEntryLoadMode(entry) === LOAD_MODE.PURE_BODYWEIGHT) return false
   entry.topW = n
   if (entry.target?.prog === 'confirmed_rep_range') return true
 
@@ -138,6 +144,7 @@ export function applyWorkoutWeights(S, entries, date) {
   S.exWeights = S.exWeights || {}
   S.progressionWeights = S.progressionWeights || {}
   ;(entries || []).forEach(entry => {
+    if (workoutEntryLoadMode(entry) === LOAD_MODE.PURE_BODYWEIGHT) return
     // Global achievements include every completed set and the explicit top-weight confirmation,
     // including optional work after the prescription.
     const globalWorking = Math.max(

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { buildPlanBundle, mergePlan, parsePlan, planPrintHTML } from './plan-share.js'
 import { EXDB } from './exercises.js'
+import { LOAD_MODE, exerciseLoadMode } from './exercise-load-mode.js'
 
 describe('plan sharing with Confirmed Rep-Range', () => {
   it('round-trips configuration but excludes recovery history and runtime controls', () => {
@@ -179,6 +180,28 @@ describe('plan sharing with Confirmed Rep-Range', () => {
 
     expect(exported).not.toHaveProperty('inc')
     expect(exported).not.toHaveProperty('weightIncrement')
+  })
+
+  it('round-trips pure and legacy added bodyweight modes without a schema migration', () => {
+    const id = EXDB.find(exercise => exercise.eq === 'body weight').id
+    const bundle = buildPlanBundle({
+      unit: 'kg', week: {}, customEx: [],
+      routines: [{
+        id: 'bodyweight', name: 'Bodyweight',
+        ex: [
+          { id, sets: 3, reps: 10, bodyweight: true, weight: 0, inc: 5 },
+          { id, sets: 3, reps: 8, bodyweight: true, weight: 10, inc: 2 }
+        ]
+      }]
+    })
+
+    expect(bundle.routines[0].ex[0]).not.toHaveProperty('weight')
+    expect(bundle.routines[0].ex[0]).not.toHaveProperty('inc')
+    expect(bundle.routines[0].ex[1].weight).toBe(10)
+    expect(bundle.routines[0].ex[1].inc).toBe(2)
+    const [pure, added] = parsePlan(JSON.stringify(bundle)).routines[0].ex
+    expect(exerciseLoadMode(pure)).toBe(LOAD_MODE.PURE_BODYWEIGHT)
+    expect(exerciseLoadMode(added)).toBe(LOAD_MODE.ADDED_BODYWEIGHT)
   })
 
   it('prints the Confirmed range when the strategy is inherited from the routine', () => {

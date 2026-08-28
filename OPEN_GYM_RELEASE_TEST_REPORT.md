@@ -475,13 +475,199 @@ pubblicazione in produzione su CasaOS.
 
 ---
 
-## 6. Stato delle release successive
+## 6. Release B — Requisito 1: corpo libero puro e zavorrato
+
+### 6.1 Esito
+
+**SUPERATO — implementazione validata e inclusa nel commit dedicato.**
+
+Gate conclusivo del 2026-08-28:
+
+```text
+Test Files  26 passed (26)
+Tests       501 passed (501)
+Failed      0
+```
+
+Non è stato introdotto un nuovo campo dati né è stata eseguita una migrazione. La modalità di
+carico è derivata da `bodyweight` e `weight`; gli snapshot terminati restano immutati.
+
+### 6.2 Comportamento funzionale verificato
+
+1. vengono distinti `external`, `pure_bodyweight` e `added_bodyweight`;
+2. nel corpo libero puro Reps mostra soltanto serie e ripetizioni;
+3. nel corpo libero puro Time mostra serie e secondi senza il precedente doppio campo peso;
+4. nel corpo libero puro Confirmed mostra serie, range e recupero, senza gruppo Carico;
+5. `Aggiungi zavorra` rivela un unico campo `Peso aggiunto`; `Rimuovi zavorra` torna a zero;
+6. una configurazione legacy `bodyweight: true` con peso positivo resta zavorrata;
+7. uno snapshot moderno con `weight: 0` è autoritativo anche contro una riga anomala positiva;
+8. uno snapshot precedente privo di `weight` può riconoscere una zavorra reale soltanto da una
+   serie completata positiva;
+9. `buildSets`, la prescrizione e lo snapshot finale forzano ogni nuova serie pura a `w = 0`;
+10. storico, `exWeights` e `progressionWeights` di una modalità incompatibile non possono
+    riapparire come carico invisibile;
+11. un passaggio da carico esterno a zavorra esplicita parte dal peso aggiunto configurato, non
+    dalla vecchia mappa operativa;
+12. Reps e Confirmed puri progrediscono in ripetizioni/serie senza inventare carico;
+13. lo streak Confirmed e il recupero adattivo non si combinano fra puro e zavorrato;
+14. il corpo libero puro non produce PR/e1RM da righe anomale, badge Best o conferma top weight;
+15. il corpo libero zavorrato conserva invece PR, working load e progressione normali;
+16. aggiungere una serie durante un workout puro mantiene `w = 0` anche su un active snapshot
+    legacy o malformato;
+17. un incremento di carico nascosto non separa due scope Reps puri equivalenti;
+18. l'incremento Time resta materiale perché indica secondi;
+19. export/import del piano omette peso e incremento di carico puri, ma conserva peso e
+    incremento della zavorra;
+20. nessuna lettura o prescrizione riscrive retroattivamente i workout completati.
+
+### 6.3 UX/UI introdotta
+
+- stato puro: testo specifico per ripetizioni o durata e pulsante `Aggiungi zavorra`;
+- stato zavorrato: un solo campo `Peso aggiunto`, incremento/preset quando applicabili e comando
+  `Rimuovi zavorra`;
+- workout puro: nessuna colonna peso, nessun badge Best e nessun foglio top weight;
+- workout zavorrato: colonna etichettata `Peso aggiunto`, derivata dal target congelato e non dai
+  valori temporanei delle righe;
+- i controlli disclosure espongono testo, `aria-expanded` e `aria-controls`;
+- le nuove stringhe sono disponibili nel fallback comune e tradotte in italiano.
+
+### 6.4 Test automatici mirati
+
+Comando:
+
+```powershell
+cd frontend
+npm.cmd test -- exercise-load-mode.test.js history.test.js progression.test.js `
+  progression-scope.test.js workout-prescription.test.js workout-scope.test.js `
+  workout-records.test.js plan-share.test.js
+```
+
+Risultato:
+
+```text
+Test Files  9 passed (9)
+Tests       321 passed (321)
+Failed      0
+```
+
+La matrice comprende classificazione, Reps/Time/Confirmed, mappe operative, transizioni,
+snapshot legacy, PR, scope, import/export, serie aggiunte e immutabilità dello storico.
+
+### 6.5 Regressione, build, lingue e diff
+
+Comandi:
+
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run build
+node scripts/check-locales.mjs
+cd ..
+git diff --check
+```
+
+Risultati:
+
+- regressione completa: **26 file, 501 test superati, 0 falliti**;
+- build Vite: **SUPERATA**, 118 moduli trasformati;
+- lingue: **11 su 11 sincronizzate**, 722 chiavi ciascuna;
+- diff check: **SUPERATO**; presenti soltanto avvisi informativi LF/CRLF;
+- warning Vite sui chunk grandi: già noto e non bloccante.
+
+### 6.6 Procedura manuale di replica
+
+#### Scenario A — Reps a corpo libero puro
+
+1. Aprire una routine e configurare un push-up in modalità Reps con `Corpo libero` attivo.
+2. Verificare che non compaiano `Peso`, `Peso aggiunto`, incremento o preset di carico.
+3. Verificare che compaia soltanto il pulsante `Aggiungi zavorra`.
+4. Salvare, avviare il workout e verificare che ogni serie contenga solo ripetizioni.
+5. Completare l'esercizio: non devono apparire badge Best o richiesta di conferma peso.
+6. Aggiungere una serie durante il workout e verificare, esportando il backup dopo il termine,
+   che anche la nuova riga abbia `w: 0`.
+
+#### Scenario B — Time a corpo libero puro
+
+1. Configurare un plank con modalità Time e corpo libero attivo.
+2. Verificare che siano visibili serie e secondi, senza alcun campo peso duplicato.
+3. Attivare la progressione `Aggiungi tempo` e impostare un passo di 5 o 10 secondi.
+4. Salvare e completare il workout: la durata deve progredire, il peso deve restare zero.
+
+#### Scenario C — Confirmed puro, anche ereditato
+
+1. Impostare `Confirmed Rep-Range` sulla routine e lasciare l'esercizio senza override locale.
+2. Configurare un pull-up a corpo libero con range 8–10.
+3. Verificare che il gruppo Carico sia assente e che range/recupero restino disponibili.
+4. Eseguire due sessioni `10/10/10/10`: la sessione seguente deve aumentare le serie e ripartire
+   da 8, senza proporre automaticamente una zavorra.
+
+#### Scenario D — Aggiunta e rimozione della zavorra
+
+1. Su un esercizio puro premere `Aggiungi zavorra`.
+2. Verificare che appaia un solo campo `Peso aggiunto`; inserire 10 kg e salvare.
+3. Riaprire la configurazione dopo refresh: il campo deve essere ancora visibile a 10 kg.
+4. Avviare il workout: la colonna deve chiamarsi `Peso aggiunto`, e il normale flusso di carico
+   e conferma peso deve essere disponibile.
+5. Terminare, riaprire la configurazione e premere `Rimuovi zavorra`.
+6. Salvare e avviare il workout successivo: tutte le righe devono partire da zero; il workout
+   zavorrato precedente deve continuare a mostrare `+10` nello storico.
+
+#### Scenario E — Protezione dalle mappe operative
+
+1. Usare lo stesso slot come esercizio esterno con un carico alto e terminare una sessione.
+2. Passarlo a corpo libero puro: il workout successivo deve essere a zero.
+3. Premere poi `Aggiungi zavorra`, impostare 5 o 10 kg e salvare.
+4. Il primo workout zavorrato deve partire dal valore appena configurato, non dal vecchio carico
+   esterno; i workout precedenti non devono cambiare.
+
+#### Scenario F — JSON legacy e piano condiviso
+
+1. Esportare un piano contenente un corpo libero puro e uno con
+   `bodyweight: true, weight: 10`.
+2. Aprire il JSON: il puro non deve contenere un peso positivo né un incremento di carico; il
+   secondo deve conservare `weight: 10`.
+3. Importare il piano in un profilo di prova: il primo deve aprirsi puro, il secondo zavorrato.
+4. Verificare nello storico un vecchio workout zavorrato: la label `+10` deve restare leggibile.
+
+#### Scenario G — Routine condivise e indipendenti
+
+1. Inserire lo stesso esercizio puro con configurazione equivalente in due routine compatibili:
+   la preview deve indicare progressione condivisa.
+2. Aggiungere zavorra soltanto in una routine e salvare: la preview deve indicare la separazione
+   futura, senza modificare i workout completati dell'altra routine.
+3. Allenare entrambe e verificare che target, streak, recupero e carico non si mescolino.
+
+#### Scenario H — Persistenza CasaOS
+
+1. Eseguire gli scenari puro e zavorrato, terminare i workout ed esportare un backup JSON.
+2. Eseguire refresh e logout/login; verificare configurazioni e storico.
+3. Riavviare i container con `docker compose down` e `docker compose up -d`, senza `-v`.
+4. Verificare che la zavorra configurata e gli snapshot storici siano invariati.
+5. Importare il backup in un profilo di prova e ripetere i controlli.
+
+### 6.7 Gate manuali ancora necessari sull'ambiente reale
+
+Non eseguiti in questa postazione:
+
+- verifica visuale a 320/360/390/430/640 px e reflow 200%;
+- screen reader e navigazione completa da tastiera;
+- refresh e sincronizzazione autenticata fra due browser reali durante un workout attivo;
+- Docker/CasaOS down/up con volume persistente;
+- WebView mobile su dispositivo fisico.
+
+I test automatici e la build sono verdi; questi gate restano necessari prima della pubblicazione
+in produzione su CasaOS.
+
+---
+
+## 7. Stato delle release successive
 
 | Release | Requisiti | Stato |
 |---|---|---|
-| A | 6 — identità e gruppi | Implementato, validato e committato; push in attesa di autenticazione GitHub |
+| A | 6 — identità e gruppi | Implementato, validato e committato |
 | A | 11 — risultati manuali e Confirmed | Implementato, validato e incluso nel commit dedicato |
-| B | 1, 5, 12, 2A, 4, 10 | Non iniziata |
+| B | 1 — corpo libero puro/zavorrato | Implementato, validato e incluso nel commit dedicato |
+| B | 5, 12, 2A, 4, 10 | Non iniziata |
 | C | 7 | Non iniziata |
 | D | 3, 2B, 2C | Non iniziata |
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |

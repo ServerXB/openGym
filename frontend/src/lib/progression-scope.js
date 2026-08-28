@@ -9,6 +9,7 @@
 // every newly-created workout snapshots both fields, so configurations can diverge safely from
 // that point onwards without rewriting history.
 import { isBodyweightEq, isCardio } from './exercises.js'
+import { isPureBodyweight } from './exercise-load-mode.js'
 
 export const LEGACY_PROGRESSION_PREFIX = 'exercise:'
 export const ROUTINE_EXERCISE_PREFIX = 'routine-exercise:'
@@ -184,17 +185,21 @@ export function progressionConfigSignature(config = {}, routine = {}, profile = 
   }
 
   const reps = positiveInt(config.reps, 10)
+  const pureBodyweight = isPureBodyweight(config)
   const hasCanonicalIncrement = Object.prototype.hasOwnProperty.call(config, 'inc')
   const rawIncrement = hasCanonicalIncrement ? config.inc : config.weightIncrement
   const parsedIncrement = Number(rawIncrement)
   const loadConfig = {
     ...base,
-    weight: Math.max(0, rounded(config.weight, 0)),
+    weight: pureBodyweight ? 0 : Math.max(0, rounded(config.weight, 0)),
     // Presence is meaningful: an explicit increment is user configuration, while a missing
-    // increment follows the exercise/unit default.
-    increment: Number.isFinite(parsedIncrement) && parsedIncrement > 0
-      ? Math.max(0.01, rounded(parsedIncrement, 0))
-      : 'default'
+    // increment follows the exercise/unit default. Pure bodyweight has no load increment at
+    // all, so an invisible stale value must not split otherwise-equivalent progression groups.
+    increment: pureBodyweight
+      ? 'not_applicable'
+      : Number.isFinite(parsedIncrement) && parsedIncrement > 0
+        ? Math.max(0.01, rounded(parsedIncrement, 0))
+        : 'default'
   }
 
   if (policy === 'confirmed_rep_range') {
@@ -417,7 +422,7 @@ export function normalizeProgressionScopes(state = {}) {
 
     // Preserve the user's current operational load while opening a new isolated history group.
     // Prefer the previous exact group, then the legacy global hint used by old openGym builds.
-    if (!state.progressionWeights[progressionId]) {
+    if (!isPureBodyweight(config) && !state.progressionWeights[progressionId]) {
       const seed = previousProgressionId && state.progressionWeights[previousProgressionId]
         ? state.progressionWeights[previousProgressionId]
         // A legacy global hint is attributable only when the exercise has one effective group.

@@ -1,6 +1,13 @@
 // Pure helpers over the state object S (ported 1:1 from the vanilla app).
 import { todayISO, isoOf, weekKey, fmtLoad, fmtNum } from './format.js'
 import { isCardio, isBodyweightEq } from './exercises.js'
+import {
+  LOAD_MODE,
+  entryMatchesLoadMode,
+  exerciseLoadMode,
+  isBodyweightConfig,
+  isPureBodyweight
+} from './exercise-load-mode.js'
 import { t } from './i18n.js'
 import { findWorkoutProgressionEntry, progressionIdOf } from './progression-scope.js'
 
@@ -32,7 +39,7 @@ export const isTimed = cfg => modeOf(cfg) === 'time'
 //                means the same thing beats two that need a legend.
 // Both are absent on every plan, workout and backup written before they existed, and absent
 // reads as false, so nothing needs migrating.
-export const isBw = cfg => (cfg && cfg.bodyweight != null ? !!cfg.bodyweight : isBodyweightEq(cfg && cfg.id))
+export const isBw = isBodyweightConfig
 export const isPerSide = cfg => !!(cfg && cfg.side)
 // What one side did, for display only. Half of an odd total is shown as it falls (8.5) rather
 // than rounded away: it means the sides were not even, which is worth seeing.
@@ -166,16 +173,25 @@ export function cleanupSg(ex) {
 
 export function lastEntryFor(S, exId, scope) {
   const progressionId = typeof scope === 'string' ? scope : scope?.progressionId
+  // A routine/active config supplies the load mode expected by the caller. Historical entries
+  // from another mode (pure bodyweight vs belt vs external load) must not seed hidden values.
+  // Callers that only pass an id keep the legacy all-history lookup used by read-only views.
+  const loadConfig = scope && typeof scope === 'object'
+    ? { ...(scope.target && typeof scope.target === 'object' ? scope.target : scope), id: exId }
+    : null
   for (let i = S.workouts.length - 1; i >= 0; i--) {
     const en = findWorkoutProgressionEntry(S, S.workouts[i], exId, progressionId)
     // `target` is what the session prescribed; finished workouts carry it so labels and the
     // progression engine can read a session back the way it was logged. Older workouts have
     // none — modeOf() falls back to the body part for them, which is what they were.
-    if (en && en.sets.some(s => s.done)) return {
-      d: S.workouts[i].d,
-      sets: en.sets.filter(s => s.done),
-      target: en.target || null,
-      progressionId: en.progressionId || null
+    if (en && en.sets.some(s => s.done)) {
+      if (loadConfig && !entryMatchesLoadMode(en, loadConfig)) continue
+      return {
+        d: S.workouts[i].d,
+        sets: en.sets.filter(s => s.done),
+        target: en.target || null,
+        progressionId: en.progressionId || null
+      }
     }
   }
   return null
@@ -205,6 +221,7 @@ export function buildSets(S, cfg) {
   const last = lastEntryFor(S, cfg.id, cfg)
   const n = Math.max(1, cfg.sets || 1)
   const mode = modeOf(cfg)
+  const pureBodyweight = isPureBodyweight(cfg)
   const sets = []
   // Last time's set at the same position, falling back to its final set when the plan grew.
   const prevAt = i => (last ? (last.sets[i] || last.sets[last.sets.length - 1]) : null)
@@ -222,21 +239,38 @@ export function buildSets(S, cfg) {
       // exercise from reps to time must not seed the duration from a rep count.
       const prev = prevAt(i)
       const carried = prev && prev.sec > 0 ? prev : null
-      sets.push({ sec: carried ? carried.sec : (cfg.sec || 45), w: carried ? (carried.w || 0) : (cfg.weight || 0), done: false })
+      sets.push({
+        sec: carried ? carried.sec : (cfg.sec || 45),
+        // Pure bodyweight is a domain invariant, not merely a hidden input. A prior belted
+        // hold or stale configured weight cannot return as an invisible load.
+        w: pureBodyweight ? 0 : (carried ? (carried.w || 0) : (cfg.weight || 0)),
+        done: false
+      })
     }
     return sets
   }
   const progressionId = cfg.progressionId ? progressionIdOf(cfg) : null
+  const latestAny = lastEntryFor(S, cfg.id, progressionId || undefined)
+  const latestAnyMatches = latestAny
+    ? entryMatchesLoadMode({ id: cfg.id, target: latestAny.target, sets: latestAny.sets }, cfg)
+    : exerciseLoadMode(cfg) === LOAD_MODE.EXTERNAL
   // A scoped working weight is operational state. `exWeights` remains the exercise-wide PR and
   // is consulted only by legacy/unscoped callers; using it here for a new isolated slot would
-  // leak another routine's heaviest load back into this prescription.
-  const conf = progressionId
-    ? S.progressionWeights?.[progressionId]
-    : S.exWeights[cfg.id]
+  // leak another routine's heaviest load back into this prescription. The map has no historical
+  // load-mode tag, so it is safe only when the latest entry in that scope has the current mode;
+  // a brand-new external lift keeps the legacy PR fallback, while explicit added load starts
+  // from the value the user entered.
+  const conf = pureBodyweight || !latestAnyMatches
+    ? null
+    : progressionId
+      ? S.progressionWeights?.[progressionId]
+      : S.exWeights?.[cfg.id]
   for (let i = 0; i < n; i++) {
     const prev = prevAt(i)
     const usable = prev && prev.r > 0 ? prev : null
-    const w = conf && conf.w > 0 ? conf.w : (usable ? usable.w : cfg.weight)
+    const w = pureBodyweight
+      ? 0
+      : (conf && conf.w > 0 ? conf.w : (usable ? usable.w : cfg.weight))
     sets.push({ w, r: usable ? usable.r : cfg.reps, done: false })
   }
   return sets

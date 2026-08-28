@@ -405,6 +405,104 @@ describe('buildSets', () => {
     expect(buildSets(S, { id: LIFT, sets: 1, reps: 8, weight: 50 })).toEqual([{ w: 75, r: 10, done: false }])
   })
 
+  it('forces pure bodyweight reps to zero and skips added-load history and operational maps', () => {
+    const S = {
+      exWeights: { [BW]: { w: 30 } },
+      progressionWeights: { 'pg-bw': { w: 20 } },
+      workouts: [
+        {
+          d: '2026-01-01',
+          entries: [{
+            id: BW, progressionId: 'pg-bw',
+            target: { bodyweight: true, weight: 0, mode: 'reps' },
+            sets: [{ w: 0, r: 12, done: true }]
+          }]
+        },
+        {
+          d: '2026-02-01',
+          entries: [{
+            id: BW, progressionId: 'pg-bw',
+            target: { bodyweight: true, weight: 10, mode: 'reps' },
+            sets: [{ w: 10, r: 8, done: true }]
+          }]
+        }
+      ]
+    }
+
+    expect(buildSets(S, {
+      id: BW, progressionId: 'pg-bw', bodyweight: true,
+      sets: 1, reps: 10, weight: 0
+    })).toEqual([{ w: 0, r: 12, done: false }])
+  })
+
+  it('forces pure bodyweight timed holds to zero without losing compatible duration history', () => {
+    const S = {
+      exWeights: { [BW]: { w: 30 } },
+      workouts: [
+        {
+          d: '2026-01-01',
+          entries: [{
+            id: BW,
+            target: { bodyweight: true, weight: 0, mode: 'time' },
+            sets: [{ sec: 70, w: 0, done: true }]
+          }]
+        },
+        {
+          d: '2026-02-01',
+          entries: [{
+            id: BW,
+            target: { bodyweight: true, weight: 10, mode: 'time' },
+            sets: [{ sec: 90, w: 10, done: true }]
+          }]
+        }
+      ]
+    }
+
+    expect(buildSets(S, {
+      id: BW, bodyweight: true, mode: 'time', sets: 1, sec: 45, weight: 0
+    })).toEqual([{ sec: 70, w: 0, done: false }])
+  })
+
+  it('keeps legacy positive bodyweight configuration on the added-load path', () => {
+    const S = {
+      exWeights: { [BW]: { w: 30 } },
+      progressionWeights: { 'pg-belt': { w: 12 } },
+      workouts: [{
+        d: '2026-01-01',
+        entries: [{
+          id: BW, progressionId: 'pg-belt',
+          target: { bodyweight: true, weight: 10, mode: 'reps' },
+          sets: [{ w: 10, r: 8, done: true }]
+        }]
+      }]
+    }
+
+    expect(buildSets(S, {
+      id: BW, progressionId: 'pg-belt', bodyweight: true,
+      sets: 1, reps: 6, weight: 10
+    })).toEqual([{ w: 12, r: 8, done: false }])
+  })
+
+  it('does not reuse an external operational map when added weight is enabled explicitly', () => {
+    const S = {
+      exWeights: { [LIFT]: { w: 80, d: '2026-02-01' } },
+      progressionWeights: { 'pg-transition': { w: 70, d: '2026-02-01' } },
+      workouts: [{
+        d: '2026-02-01',
+        entries: [{
+          id: LIFT, progressionId: 'pg-transition',
+          target: { bodyweight: false, weight: 70, mode: 'reps' },
+          sets: [{ w: 70, r: 8, done: true }]
+        }]
+      }]
+    }
+
+    expect(buildSets(S, {
+      id: LIFT, progressionId: 'pg-transition', bodyweight: true,
+      sets: 1, reps: 8, weight: 10
+    })).toEqual([{ w: 10, r: 8, done: false }])
+  })
+
   it('uses only the matching progression entry when one workout contains duplicate exercises', () => {
     const S = {
       exWeights: { [LIFT]: { w: 100 } },

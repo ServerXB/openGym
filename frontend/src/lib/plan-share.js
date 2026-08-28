@@ -10,6 +10,7 @@
 
 import { EXIDX, isBodyweightEq } from './exercises.js'
 import { modeOf, fmtSec, isBw, isPerSide, sideReps, confirmedRepRangeBounds } from './history.js'
+import { isPureBodyweight } from './exercise-load-mode.js'
 import { uid, todayISO, DAYN, fmtLoad, fmtNum, exCount } from './format.js'
 import { t } from './i18n.js'
 import {
@@ -60,7 +61,9 @@ function cleanEx(e, progressionGroup) {
   const inc = Object.prototype.hasOwnProperty.call(e, 'inc')
     ? planIncrement(e.inc)
     : planIncrement(e.weightIncrement)
-  if (inc != null) o.inc = inc
+  // A load step is not part of a pure bodyweight reps plan. Time-mode `inc` remains meaningful
+  // because it is the duration step, and an explicitly added bodyweight load keeps its step.
+  if (inc != null && !(mode === 'reps' && isPureBodyweight(e))) o.inc = inc
   if (e.repsMin != null) o.repsMin = e.repsMin
   if (e.repsMax != null) o.repsMax = e.repsMax
   // Confirmed Rep-Range configuration is part of the plan. Runtime recovery controls,

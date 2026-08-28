@@ -2,16 +2,21 @@ import { buildSets } from './history.js'
 import { applyPrescription, nextPrescription } from './progression.js'
 import { progressionScopeSnapshot } from './progression-scope.js'
 import { targetForPrescription } from './workout-prescription.js'
+import { isPureBodyweight } from './exercise-load-mode.js'
 
 export function buildScopedWorkoutEntry(state, config, routine) {
   const plan = nextPrescription(state, config, routine)
+  const target = targetForPrescription(config, plan)
+  const sets = applyPrescription(buildSets(state, config), plan)
   return {
     id: config.id,
     sg: config.sg,
     ...progressionScopeSnapshot(config),
-    target: targetForPrescription(config, plan),
+    target,
     plan,
-    sets: applyPrescription(buildSets(state, config), plan)
+    // Defence in depth at the persistence boundary. Both builders already enforce this rule,
+    // but the workout snapshot must remain safe if a future policy accidentally returns load.
+    sets: isPureBodyweight(target) ? sets.map(set => ({ ...set, w: 0 })) : sets
   }
 }
 

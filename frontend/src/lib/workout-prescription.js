@@ -1,6 +1,8 @@
 // Keep target snapshots identical for routine workouts and exercises added mid-session.
 // Finished workouts retain `target` but not the explanatory live `plan`, so every field that
 // future progression needs must be copied here in one place.
+import { isPureBodyweight } from './exercise-load-mode.js'
+
 const PLAN_TARGET_FIELDS = [
   // These are part of the prescription, not merely of the routine configuration. In
   // particular `inc` is already resolved by the progression engine when the routine leaves
@@ -26,6 +28,7 @@ const PLAN_TARGET_FIELDS = [
 ]
 
 export function targetForPrescription(config = {}, plan = {}) {
+  const pureBodyweight = isPureBodyweight(config)
   const target = { ...config }
   if (plan.policy === 'confirmed_rep_range') target.prog = plan.policy
   if (plan.reps != null) {
@@ -34,6 +37,17 @@ export function targetForPrescription(config = {}, plan = {}) {
   }
   for (const field of PLAN_TARGET_FIELDS) {
     if (plan[field] != null) target[field] = plan[field]
+  }
+  // Final snapshot invariant: an imported/stale plan can never turn a configuration that was
+  // explicitly pure when the workout started into an invisibly loaded entry.
+  if (pureBodyweight) {
+    target.weight = 0
+    // In reps mode this is a load increment and has no meaning until added weight is explicitly
+    // enabled. Timed bodyweight work keeps `inc`, where it means seconds rather than kilograms.
+    if (target.mode !== 'time') {
+      delete target.inc
+      delete target.weightIncrement
+    }
   }
   return target
 }

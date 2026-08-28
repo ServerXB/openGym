@@ -33,6 +33,20 @@ describe('workout prescription target snapshot', () => {
       { policy: 'time', sets: 4, sec: 50, inc: 5 }
     )).toEqual({ id: 'plank', mode: 'time', sets: 4, sec: 50, weight: 10, inc: 5 })
   })
+
+  it('forces a pure bodyweight snapshot to zero even if a stale plan proposes load', () => {
+    expect(targetForPrescription(
+      { id: 'push-up', bodyweight: true, mode: 'reps', sets: 3, reps: 10, weight: 0 },
+      { policy: 'linear', weight: 20, inc: 2 }
+    )).toEqual({
+      id: 'push-up', bodyweight: true, mode: 'reps', sets: 3, reps: 10, weight: 0
+    })
+
+    expect(targetForPrescription(
+      { id: 'plank', bodyweight: true, mode: 'time', sets: 3, sec: 45, weight: -10 },
+      { policy: 'time', weight: 15, sec: 50, inc: 5 }
+    )).toMatchObject({ bodyweight: true, weight: 0, sec: 50, inc: 5 })
+  })
 })
 
 describe('active workout load increment', () => {

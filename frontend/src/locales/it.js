@@ -633,7 +633,12 @@ export default {
   // --- bodyweight & per side ---
   'Bodyweight': 'Corpo libero',
   'No weight to enter — just log the reps.': 'Nessun peso da inserire — registra solo le ripetizioni.',
+  'No weight to enter — just log the duration.': 'Nessun peso da inserire — registra solo la durata.',
+  'Added weight is logged separately from your body weight.': 'La zavorra viene registrata separatamente dal peso corporeo.',
   'Ask for a weight on every set.': 'Chiedi un peso a ogni serie.',
+  'Add weight': 'Aggiungi zavorra',
+  'Remove added weight': 'Rimuovi zavorra',
+  'Added weight ({0})': 'Peso aggiunto ({0})',
   'For dips or pull-ups with a belt. Progression then follows the weight.': 'Per dip o trazioni con la cintura. La progressione segue poi il peso.',
   'Reps per side': 'Ripetizioni per lato',
   'For lunges, single-arm rows and the like.': 'Per affondi, rematori a un braccio e simili.',

@@ -30,6 +30,7 @@ import {
   CONFIRMED_REST_REDUCTION_MANUAL
 } from './lib/confirmedRepRangeAutoRest.js'
 import { resetConfirmedRepRangeRest } from './lib/confirmedRepRangeRest.js'
+import { LOAD_MODE, hasAddedBodyweightLoad, isPureBodyweight, workoutEntryLoadMode } from './lib/exercise-load-mode.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import {
   createRoutineExerciseId,
@@ -481,8 +482,8 @@ export const exercisePicker = onPick => ui().openSheet(close => <ExercisePicker 
 // Progression settings for one exercise (issue #17). Shown inside the config sheet because
 // "how does this lift go up" belongs next to sets and reps, not in a separate screen. Left
 // on "follow the routine" it inherits, so most people never touch it.
-function ConfigGroup({ legend, children, className = '' }) {
-  return <fieldset className={'cfg-group ' + className}>
+function ConfigGroup({ legend, children, className = '', ...rest }) {
+  return <fieldset className={'cfg-group ' + className} {...rest}>
     <legend>{legend}</legend>
     {children}
   </fieldset>
@@ -504,7 +505,7 @@ function IncrementPresets({ value, unit, onChange }) {
   </div>
 }
 
-function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, perSide, onValidityChange }) {
+function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, addedLoad, perSide, onRemoveAddedLoad, onValidityChange }) {
   const st = useStore(s => s.S)
   const [incrementError, setIncrementError] = useState(null)
   const [incrementInputVersion, setIncrementInputVersion] = useState(0)
@@ -517,7 +518,7 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
     // validation reset so a rejected raw draft cannot survive a policy switch after its alert
     // and Save lock have been cleared.
     setIncrementInputVersion(version => version + 1)
-  }, [active, mode])
+  }, [active, mode, bw, addedLoad])
   useEffect(() => onValidityChange?.(!incrementError), [incrementError, onValidityChange])
   if (options.length < 2) return null
   const inc = mode === 'time'
@@ -616,7 +617,7 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
         {t('Saving separates this progression from the next workout. It starts from the edited configuration and current working load; the shared completed history remains unchanged.')}
       </p>}
     </ConfigGroup>
-    {active !== 'off' && active !== 'confirmed_rep_range' && <ConfigGroup
+    {active !== 'off' && active !== 'confirmed_rep_range' && (mode === 'time' || !bw || addedLoad) && <ConfigGroup
       legend={mode === 'time' ? t('Progression') : t('Load')} className="cfg-progression-group">
       <div className="cfg-grid">
         <Stepper key={mode === 'time' ? undefined : incrementInputVersion}
@@ -641,9 +642,9 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
         </div>
       </ConfigGroup>
 
-      <ConfigGroup legend={t('Load')}>
+      {(!bw || addedLoad) && <ConfigGroup id={bw ? `added-load-${String(ex.id).replace(/[^a-zA-Z0-9_-]/g, '')}` : undefined} legend={t('Load')}>
         <div className="cfg-grid">
-          <Stepper label={bw ? t('Added ({0})', unit) : t('Weight ({0})', unit)} value={c.weight || 0}
+          <Stepper label={bw ? t('Added weight ({0})', unit) : t('Weight ({0})', unit)} value={c.weight || 0}
             unit={unit} step={inc} onChange={v => setC(x => ({ ...x, weight: v }))} />
           <Stepper key={incrementInputVersion} label={t('Step ({0})', unit)} value={inc} unit={unit} step={0.25}
             onChange={setLoadInc} onRawChange={setLoadIncRaw} invalid={!!incrementError}
@@ -657,7 +658,10 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, per
           <strong>{fmtLoad(previewWeight)} → {fmtLoad(nextLoad)} {unit}</strong>
         </div>}
         {bw && <p className="cfg-help">{t('For dips or pull-ups with a belt. Progression then follows the weight.')}</p>}
-      </ConfigGroup>
+        {bw && <Button type="button" size="sm" variant="ghost" icon="xmark" onClick={onRemoveAddedLoad}>
+          {t('Remove added weight')}
+        </Button>}
+      </ConfigGroup>}
 
       <ConfigGroup legend={t('Rep range')}>
         <div className="cfg-grid">
@@ -724,27 +728,40 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   const st = useStore(s => s.S)
   const cardio = isCardio(ex.id)
   const [c, setC] = useState(existing || defaultConfig(ex.id))
+  // The added-load editor is a local disclosure, not persisted state. Existing plans with a
+  // positive bodyweight load open it automatically; saving 0 keeps the exercise bodyweight-only.
+  const [addedLoadOpen, setAddedLoadOpen] = useState(() =>
+    hasAddedBodyweightLoad({ ...(existing || defaultConfig(ex.id)), id: ex.id })
+  )
   const [progressionValid, setProgressionValid] = useState(true)
   // Cardio keeps its own duration+speed form; the reps/time choice (issue #16) is offered for
   // everything else, which is where the gap was — planks, hangs, wall sits, loaded carries.
   const mode = cardio ? 'cardio' : modeOf({ ...c, id: ex.id })
   // Both default from the dataset and are then whatever the config says — see isBw.
   const bw = !cardio && isBw({ ...c, id: ex.id })
+  const addedLoad = bw && (addedLoadOpen || hasAddedBodyweightLoad({ ...c, id: ex.id }))
   const perSide = isPerSide(c)
   const activePolicy = policyFor({ ...c, id: ex.id }, routine, mode)
   const confirmed = mode === 'reps' && activePolicy === 'confirmed_rep_range'
   const effectiveIncrement = loadIncrementFor({ ...c, id: ex.id }, st.unit)
+  const addedLoadId = `added-load-${String(ex.id).replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const removeAddedLoad = () => {
+    setC(x => ({ ...x, weight: 0 }))
+    setAddedLoadOpen(false)
+  }
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
   const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
   const save = () => {
     if (!progressionValid) return
     close()
     const sets = Math.max(1, Math.round(c.sets) || (cardio ? 1 : 3))
+    const pureBodyweight = !cardio && isPureBodyweight({ ...c, id: ex.id })
+    const savedWeight = pureBodyweight ? 0 : Math.max(0, c.weight || 0)
     // Only carry progression settings that differ from the inherited default, so a plan file
     // stays readable and "follow the routine" keeps meaning exactly that.
     const prog = {}
     if (c.prog) prog.prog = c.prog
-    if ((mode === 'time' && c.inc > 0) || (mode !== 'time' && (c.inc > 0 || c.weightIncrement > 0))) {
+    if ((mode === 'time' && c.inc > 0) || (mode !== 'time' && !pureBodyweight && (c.inc > 0 || c.weightIncrement > 0))) {
       prog.inc = mode === 'time' ? c.inc : loadIncrementFor({ ...c, id: ex.id }, st.unit)
     }
     const confirmedActive = mode === 'reps' && policyFor({ ...c, id: ex.id }, routine, 'reps') === 'confirmed_rep_range'
@@ -764,7 +781,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     const flags = {}
     if (bw !== isBodyweightEq(ex.id)) flags.bodyweight = bw
     if (cardio) onSave({ sets, min: Math.max(1, Math.round(c.min) || 20), speed: Math.max(0, c.speed || 8) })
-    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: Math.max(0, c.weight || 0), ...flags, ...prog })
+    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: savedWeight, ...flags, ...prog })
     else {
       // A unilateral target is stored even: the split has to divide, and a typed 15 would
       // otherwise plan seven reps on one side and eight on the other, every session.
@@ -772,7 +789,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       // dormant and reappear unchanged if the user later switches back to another policy.
       const typed = Math.max(1, Math.round(c.reps) || 10)
       const reps = perSide ? Math.ceil(typed / 2) * 2 : typed
-      const out = { sets, mode: 'reps', reps, weight: Math.max(0, c.weight || 0), ...flags, ...(perSide ? { side: true } : {}), ...prog }
+      const out = { sets, mode: 'reps', reps, weight: savedWeight, ...flags, ...(perSide ? { side: true } : {}), ...prog }
       if (policyFor({ ...c, id: ex.id }, routine, 'reps') === 'double') out.repsMin = Math.min(reps, Math.max(1, Math.round(c.repsMin) || Math.max(1, reps - 2)))
       // A ceiling below the working reps would tell you to add a set on day one.
       if (bw && !(out.weight > 0) && c.repsMax > 0) out.repsMax = Math.max(reps, Math.round(c.repsMax))
@@ -799,7 +816,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       </> : mode === 'time' ? <>
         <Stepper label={t('Sets')} value={c.sets} step={1} decimal={false} onChange={v => setC(x => ({ ...x, sets: v }))} />
         <Stepper label={t('Seconds')} value={c.sec} step={5} decimal={false} onChange={v => setC(x => ({ ...x, sec: v }))} />
-        <Stepper label={t('Weight ({0})', st.unit)} value={c.weight} step={2.5} onChange={v => setC(x => ({ ...x, weight: v }))} />
+        {!bw && <Stepper label={t('Weight ({0})', st.unit)} value={c.weight} step={2.5} onChange={v => setC(x => ({ ...x, weight: v }))} />}
       </> : <>
         <Stepper label={t('Sets')} value={c.sets} step={1} decimal={false} onChange={v => setC(x => ({ ...x, sets: v }))} />
         <Stepper label={t('Reps')} value={c.reps} step={perSide ? 2 : 1} decimal={false} onChange={v => setC(x => ({ ...x, reps: v }))} />
@@ -814,9 +831,16 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     {/* ---------- bodyweight + per side (issues #31/#32/#33) ---------- */}
     {!cardio && <div className="sect-b" style={{ marginBottom: 8 }}>
       <Row icon="figureStrength" iconTint="var(--acc)" title={t('Bodyweight')}
-        subtitle={bw ? t('No weight to enter — just log the reps.') : t('Ask for a weight on every set.')}>
+        subtitle={bw
+          ? (addedLoad
+              ? t('Added weight is logged separately from your body weight.')
+              : t(mode === 'time' ? 'No weight to enter — just log the duration.' : 'No weight to enter — just log the reps.'))
+          : t('Ask for a weight on every set.')}>
         <Switch ariaLabel={t('Bodyweight')} checked={bw}
-          onChange={v => setC(x => ({ ...x, bodyweight: v, weight: v ? 0 : x.weight }))} />
+          onChange={v => {
+            setC(x => ({ ...x, bodyweight: v, weight: v ? 0 : x.weight }))
+            if (v) setAddedLoadOpen(false)
+          }} />
       </Row>
       {mode === 'reps' && <Row icon="shuffle" iconTint="var(--blue)" title={t('Reps per side')}
         subtitle={perSide ? (() => {
@@ -837,15 +861,21 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     {/* A stepper is too wide to sit in a list row next to a label — it squeezes the text to
         one word per line — so added weight gets the same full-width treatment as sets and
         reps, with its explanation underneath. */}
-    {bw && !confirmed && <>
+    {bw && !addedLoad && <div style={{ marginBottom: 18 }}>
+      <Button type="button" size="sm" icon="plus" aria-expanded="false" aria-controls={addedLoadId}
+        onClick={() => setAddedLoadOpen(true)}>{t('Add weight')}</Button>
+    </div>}
+    {bw && addedLoad && !confirmed && <div id={addedLoadId} style={{ marginBottom: 18 }}>
       <div className="row cfgrow" style={{ marginBottom: 8 }}>
-        <Stepper label={t('Added ({0})', st.unit)} value={c.weight || 0} step={effectiveIncrement}
+        <Stepper label={t('Added weight ({0})', st.unit)} value={c.weight || 0} step={effectiveIncrement}
           onChange={v => setC(x => ({ ...x, weight: v }))} />
       </div>
       <div className="small dim" style={{ marginBottom: 18 }}>
         {t('For dips or pull-ups with a belt. Progression then follows the weight.')}
       </div>
-    </>}
+      <Button type="button" size="sm" variant="ghost" icon="xmark" aria-expanded="true"
+        aria-controls={addedLoadId} onClick={removeAddedLoad}>{t('Remove added weight')}</Button>
+    </div>}
     {/* The rep ceiling only means something when there is no load to add instead. */}
     {mode === 'reps' && !confirmed && bw && !(c.weight > 0) && <div className="row cfgrow" style={{ marginBottom: 18 }}>
       <Stepper label={t('Top of the range')} value={c.repsMax || 0} step={1} decimal={false}
@@ -857,7 +887,8 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
         : t('Reps climb by one whenever every set was clean. Set a ceiling to add sets instead of reps forever.')}
     </div>}
     <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} existing={existing} routine={routine}
-      unit={st.unit} bw={bw} perSide={perSide} onValidityChange={setProgressionValid} />
+      unit={st.unit} bw={bw} addedLoad={addedLoad} perSide={perSide} onRemoveAddedLoad={removeAddedLoad}
+      onValidityChange={setProgressionValid} />
     <Button variant="primary" disabled={!progressionValid} onClick={save}>{existing ? t('Save') : t('Add to routine')}</Button>
     {ex.custom && <><div style={{ height: 8 }} /><Button icon="pencil" onClick={() => { close(); customExSheet(ex) }}>{t('Edit or delete this exercise')}</Button></>}
     {onDelete && <><div style={{ height: 8 }} /><Button variant="danger" onClick={() => { close(); onDelete() }}>{t('Remove from routine')}</Button></>}
@@ -1112,18 +1143,19 @@ function TopWeight({ entryIdx, close }) {
   // the whole app down with it. Hooks still run unconditionally, so the bail-out has
   // to sit after every one of them.
   const entry = A ? A.entries[entryIdx] : null
+  const pureBodyweight = !!entry && workoutEntryLoadMode(entry) === LOAD_MODE.PURE_BODYWEIGHT
   const ex = entry && EXIDX[entry.id]
   const maxSet = entry ? Math.max(0, ...entry.sets.filter(s => s.done).map(s => s.w || 0)) : 0
   const prevBest = entry ? Math.max((st.exWeights[entry.id] || {}).w || 0, bestWeightFor(st, entry.id)) : 0
-  const [v, setV] = useState(entry ? (Math.max(maxSet, prevBest) || entry.target.weight || 0) : 0)
-  useEffect(() => { if (!entry) close() }, [!entry])
+  const [v, setV] = useState(entry ? (Math.max(maxSet, prevBest) || entry.target?.weight || 0) : 0)
+  useEffect(() => { if (!entry || pureBodyweight) close() }, [!entry, pureBodyweight])
 
   const units = supersetUnits(A ? A.entries : [])
   const unit = entry ? unitOf(units, entryIdx) : []
   const unitDone = !!entry && unitPrescribedComplete(A.entries, unit)
   const unitIdx = units.findIndex(u => u === unit)
   const isLastUnit = unitIdx === units.length - 1
-  if (!entry || !ex) return null
+  if (!entry || !ex || pureBodyweight) return null
   const confirmed = entry.target?.prog === 'confirmed_rep_range'
 
   const commit = advance => {

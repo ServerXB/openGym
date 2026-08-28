@@ -223,6 +223,43 @@ describe('progression scope normalization', () => {
     expect(state.progressionWeights[heavy.progressionId]).toBeUndefined()
     expect(state.exWeights.bench.w).toBe(120)
   })
+
+  it('does not seed a pure bodyweight group from the exercise-wide load record', () => {
+    const state = {
+      exWeights: { bench: { w: 80, d: '2026-08-01' } },
+      routines: [{
+        id: 'bodyweight-day',
+        ex: [lift({ bodyweight: true, weight: 0 })]
+      }]
+    }
+
+    normalizeProgressionScopes(state)
+    const exercise = state.routines[0].ex[0]
+    expect(state.progressionWeights[exercise.progressionId]).toBeUndefined()
+    expect(state.exWeights.bench).toEqual({ w: 80, d: '2026-08-01' })
+  })
+
+  it('does not copy a shared loaded baseline into a newly forked pure bodyweight group', () => {
+    const state = {
+      routines: [
+        { id: 'a', ex: [lift()] },
+        { id: 'b', ex: [lift()] }
+      ]
+    }
+    normalizeProgressionScopes(state)
+    const loadedProgressionId = state.routines[0].ex[0].progressionId
+    state.progressionWeights[loadedProgressionId] = { w: 70, d: '2026-08-01' }
+
+    state.routines[0].ex[0].bodyweight = true
+    state.routines[0].ex[0].weight = 0
+    normalizeProgressionScopes(state)
+
+    const pure = state.routines[0].ex[0]
+    const loaded = state.routines[1].ex[0]
+    expect(pure.progressionId).not.toBe(loaded.progressionId)
+    expect(state.progressionWeights[pure.progressionId]).toBeUndefined()
+    expect(state.progressionWeights[loaded.progressionId]).toEqual({ w: 70, d: '2026-08-01' })
+  })
 })
 
 describe('progression scope compatibility helpers', () => {
@@ -300,6 +337,20 @@ describe('progression scope compatibility helpers', () => {
   it('ignores the obsolete ordinary reps field in a Confirmed configuration', () => {
     expect(progressionConfigSignature(lift({ reps: 8 })))
       .toBe(progressionConfigSignature(lift({ reps: 10 })))
+  })
+
+  it('keeps external, pure bodyweight and added bodyweight configurations separate', () => {
+    const external = progressionConfigSignature(lift({ weight: 0, bodyweight: false }))
+    const pure = progressionConfigSignature(lift({ weight: 0, bodyweight: true }))
+    const added = progressionConfigSignature(lift({ weight: 10, bodyweight: true }))
+    expect(new Set([external, pure, added]).size).toBe(3)
+  })
+
+  it('ignores non-material load increments for pure reps but keeps timed seconds increments', () => {
+    expect(progressionConfigSignature(lift({ bodyweight: true, weight: 0, inc: 2 })))
+      .toBe(progressionConfigSignature(lift({ bodyweight: true, weight: 0, inc: 5 })))
+    expect(progressionConfigSignature(lift({ bodyweight: true, weight: 0, mode: 'time', inc: 5 })))
+      .not.toBe(progressionConfigSignature(lift({ bodyweight: true, weight: 0, mode: 'time', inc: 10 })))
   })
 
   it('matches runtime semantics for missing sets, null recovery and canonical increment presence', () => {

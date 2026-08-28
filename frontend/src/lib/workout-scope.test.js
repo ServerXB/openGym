@@ -51,4 +51,23 @@ describe('workout progression scope lifecycle', () => {
       expect.objectContaining({ id: 'confirmed', target: confirmed.target, sets: confirmed.sets })
     ])
   })
+
+  it.each([
+    ['reps', { reps: 10, prog: 'linear' }],
+    ['time', { sec: 45, prog: 'time' }],
+    ['confirmed', { reps: 8, minReps: 8, maxReps: 12, prog: 'confirmed_rep_range' }]
+  ])('persists zero load for a pure bodyweight %s prescription', (_case, fields) => {
+    const config = {
+      id: 'bodyweight-movement', bodyweight: true, weight: 0, sets: 3,
+      mode: fields.sec ? 'time' : 'reps', ...fields
+    }
+    const state = {
+      unit: 'kg', restSec: 90, workouts: [], exWeights: { [config.id]: { w: 50 } },
+      progressionWeights: {}, progressionControls: {}
+    }
+
+    const entry = buildScopedWorkoutEntry(state, config)
+    expect(entry.target.weight).toBe(0)
+    expect(entry.sets.every(set => set.w === 0)).toBe(true)
+  })
 })

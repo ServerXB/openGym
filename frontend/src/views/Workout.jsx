@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { exOr } from '../lib/exercises.js'
-import { effectiveRoutine, lastEntryFor, bestWeightFor, buildSets, supersetUnits, unitOf, setLabel, modeOf, isBw, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
+import { effectiveRoutine, lastEntryFor, bestWeightFor, buildSets, supersetUnits, unitOf, setLabel, modeOf, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
 import { fmtLoad, fmtNum, fmtDate, todayISO, uid, exCount, DAYN } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { t } from '../lib/i18n.js'
@@ -17,6 +17,7 @@ import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
 import { loadIncrementForPrescription, targetForPrescription } from '../lib/workout-prescription.js'
 import { progressionScopeSnapshot } from '../lib/progression-scope.js'
+import { LOAD_MODE, workoutEntryLoadMode } from '../lib/exercise-load-mode.js'
 import { applySetCountFromNextWorkout, entrySetStatus, futureSetCountPresentation, invalidateEntryReview, isOptionalSet, prescribedSetCount, unitPrescribedComplete, workoutSetStatus } from '../lib/workout-set-status.js'
 
 /* ---------- start chooser (no active workout) ---------- */
@@ -70,9 +71,6 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   const cardio = mode === 'cardio'
   const timed = mode === 'time'
   const last = lastEntryFor(S, entry.id, entry)
-  // The same number the "confirm your working weight" sheet calls your best, so the two
-  // never disagree inside one session: heaviest logged set, or the working weight you kept.
-  const best = cardio ? 0 : Math.max(bestWeightFor(S, entry.id), (S.exWeights[entry.id] || {}).w || 0)
   // What the progression policy decided for this session, and why (issue #17). Computed when
   // the session was built so the reason matches the numbers already in the rows.
   const plan = entry.plan
@@ -80,13 +78,20 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   // stepper instead of two, which is the whole point of the flag. Adding a belt weight in the
   // config brings it back, now labelled as the addition it is.
   const cfg = { ...(entry.target || {}), id: entry.id }
-  const bw = !cardio && isBw(cfg)
-  const added = bw && entry.sets.some(s => s.w > 0)
+  const loadMode = workoutEntryLoadMode(entry)
+  const bw = !cardio && loadMode !== LOAD_MODE.EXTERNAL
+  const pureBodyweight = !cardio && loadMode === LOAD_MODE.PURE_BODYWEIGHT
+  const added = bw && loadMode === LOAD_MODE.ADDED_BODYWEIGHT
+  // A historical added-load record remains available in History, but it must not appear as
+  // the working "Best" of a bodyweight-only prescription frozen for this workout.
+  const best = cardio || pureBodyweight
+    ? 0
+    : Math.max(bestWeightFor(S, entry.id), (S.exWeights[entry.id] || {}).w || 0)
   // Rep-work load controls use the increment captured when this workout was prescribed.
   // Timed progression's `inc` is a duration increment, so its optional load keeps the legacy
   // 2.5 step rather than accidentally treating (for example) +5 seconds as +5 kg.
   const loadStep = mode === 'reps' ? loadIncrementForPrescription(entry) : 2.5
-  const loadCol = { f: 'w', step: loadStep, dec: true, hd: bw ? t('Added ({0})', S.unit) : t('Weight ({0})', S.unit) }
+  const loadCol = { f: 'w', step: loadStep, dec: true, hd: added ? t('Added weight ({0})', S.unit) : t('Weight ({0})', S.unit) }
   // The reps column is the total in every mode, unilateral included — the stepper walks in
   // twos there so the number you land on is one you can actually split evenly.
   const repCol = { f: 'r', step: repStep(cfg), dec: false, hd: t('Reps') }
@@ -209,9 +214,14 @@ function ActiveWorkout() {
     invalidateEntryReview(e, { optionalOnly: isOptionalSet(e, e.sets.length) })
     const l = e.sets[e.sets.length - 1]
     const m = modeOf({ ...(e.target || {}), id: e.id })
+    const pureBodyweight = workoutEntryLoadMode(e) === LOAD_MODE.PURE_BODYWEIGHT
     if (m === 'cardio') e.sets.push({ min: l ? l.min : (e.target.min || 20), speed: l ? l.speed : (e.target.speed || 8), done: false })
-    else if (m === 'time') e.sets.push({ sec: l ? l.sec : (e.target.sec || 45), w: l ? (l.w || 0) : (e.target.weight || 0), done: false })
-    else e.sets.push({ w: l ? l.w : 0, r: l ? l.r : e.target.reps, done: false })
+    else if (m === 'time') e.sets.push({
+      sec: l ? l.sec : (e.target.sec || 45),
+      w: pureBodyweight ? 0 : (l ? (l.w || 0) : (e.target.weight || 0)),
+      done: false
+    })
+    else e.sets.push({ w: pureBodyweight ? 0 : (l ? l.w : 0), r: l ? l.r : e.target.reps, done: false })
   })
   const removeSet = idx => mutEntry(idx, e => {
     if (e.sets.length <= 1) return
@@ -275,7 +285,10 @@ function ActiveWorkout() {
         // Only loaded reps training has a "working weight" worth confirming — a bodyweight
         // plank has nothing to put in that slider, and neither does a set of push-ups
         // (issue #32: the fewest taps that still record what happened).
-        const loaded = m === 'reps' && !(isBw({ ...(e.target || {}), id: e.id }) && !e.sets.some(x => x.w > 0))
+        const loadMode = workoutEntryLoadMode(e)
+        const loaded = m === 'reps'
+          && loadMode !== LOAD_MODE.PURE_BODYWEIGHT
+          && (loadMode === LOAD_MODE.EXTERNAL || e.sets.some(x => x.w > 0))
         const prescribedJustCompleted = !wasPrescribedComplete && entrySetStatus(e).prescribedComplete
         if (prescribedJustCompleted) { exJustDone = true; if (loaded && !e.asked) { e.asked = true; askTop = true } }
       }
