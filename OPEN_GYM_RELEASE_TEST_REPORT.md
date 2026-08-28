@@ -10,7 +10,7 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 ## 2. Ambiente di riferimento
 
 - Data ultimo aggiornamento: 2026-08-27
-- Repository: `https://github.com/ruvelro/openGym.git`
+- Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
 - Sistema usato per i test: Windows PowerShell
@@ -48,7 +48,7 @@ iterazione sono stati eseguiti su dipendenze già presenti e coerenti con `packa
 
 **SUPERATO — commit dedicato creato.**
 
-Gate finale del 2026-08-27:
+Gate finale del 2026-08-28:
 
 ```text
 Test Files  24 passed (24)
@@ -249,12 +249,238 @@ restano obbligatori prima della pubblicazione in produzione su CasaOS.
 
 ---
 
-## 5. Stato delle release successive
+## 5. Release A — Requisito 11: risultati manuali e livello Confirmed validato
+
+### 5.1 Esito
+
+**SUPERATO — implementazione validata e inclusa nel commit dedicato.**
+
+Gate finale del 2026-08-27:
+
+```text
+Test Files  25 passed (25)
+Tests       471 passed (471)
+Failed      0
+```
+
+Rispetto al gate del requisito 6 sono presenti 65 test in più e un nuovo file di test. La build
+di produzione è riuscita, 117 moduli sono stati trasformati e le 11 lingue risultano
+sincronizzate con 717 chiavi ciascuna.
+
+### 5.2 Regole di dominio verificate
+
+Per le sole serie prescritte, cioè le prime `target.sets`, il reducer storico deriva ora:
+
+```text
+incomplete        una serie prescritta manca o non è completata
+mixed_load        tutte le serie sono completate, ma i carichi non sono uniformi
+failed            tutte sono completate a carico uniforme, almeno una è sotto il target
+success           tutte raggiungono il target e validano un livello sotto il massimo
+top_range_success tutte raggiungono il massimo del range
+```
+
+Sono stati verificati questi invarianti:
+
+1. `validatedReps` è il più alto livello valido non superiore al minimo delle ripetizioni
+   completate in tutte le serie prescritte;
+2. ripetizioni oltre `maxReps` valgono al massimo `maxReps` e una sessione produce al massimo una
+   conferma;
+3. target 8 con `9/9/9/9` nel range 8–10 prescrive 10;
+4. target 8 con `10/10/9/10` valida 9 e prescrive 10;
+5. target 8 con `10/9/8/10` valida 8 e prescrive 9;
+6. due workout congelati con target 8 e 9, entrambi eseguiti `10/10/10/10` a 70 kg, producono
+   72 kg × 8 con incremento esatto di 2 kg;
+7. lo streak richiede stesso `progressionId`, stesso range e stesso carico uniforme;
+8. fallimento, incompletezza, successo non-top, range differente o cambio carico interrompono la
+   conferma al massimo;
+9. una serie successiva realmente eseguita sotto target può aggiungere 30 secondi; una serie
+   mancante/rimossa non simula un fallimento e non aumenta il recupero;
+10. una serie extra riuscita, fallita o non completata non modifica target, streak, recupero o
+    working load;
+11. tutte le serie prescritte allo stesso peso modificato possono stabilire la nuova baseline;
+    carichi misti non promuovono il massimo isolato;
+12. il PR globale può includere una serie opzionale, mentre `progressionWeights` usa soltanto il
+    blocco prescritto uniforme;
+13. i passi di ripetizione per lato arrotondano al livello valido inferiore e avanzano di due;
+14. corpo libero e limite massimo di serie conservano il comportamento precedente;
+15. un cambio strutturale del range apre un nuovo blocco al minimo senza riscrivere lo storico;
+16. uno snapshot legacy privo del range mantiene l'avanzamento sequenziale conservativo, ma non
+    riceve conferme accelerate inventate dalla configurazione corrente;
+17. ogni nuovo snapshot Confirmed materializza `minReps`, `maxReps` e `rangeStep`;
+18. serializzazione JSON e ricalcolo non mutano i workout completati;
+19. un workout Confirmed interamente saltato interrompe lo streak senza simulare un fallimento;
+20. un set isolato di una sessione incompleta e un blocco a carichi misti non possono diventare
+    la baseline quando il vecchio snapshot non contiene il peso;
+21. se il comando sul numero di serie separa un gruppo condiviso durante il workout, un blocco
+    prescritto uniforme aggiorna sia il gruppo proprietario dello snapshot sia la baseline del
+    suo esatto ramo futuro; una serie opzionale più pesante resta esclusa.
+
+### 5.3 UX e lifecycle verificati
+
+- le righe oltre `target.sets` mostrano la label testuale `Opzionale`;
+- header, barra, heartbeat, completamento esercizio/superset e prompt finale contano separatamente
+  serie prescritte e opzionali;
+- una extra non spuntata non produce un falso `Termina in anticipo`;
+- una serie prescritta rimossa resta mancante rispetto allo snapshot e produce una sessione
+  incompleta;
+- add/remove/edit/toggle invalidano un'eventuale conferma peso obsoleta;
+- le modifiche limitate alle serie opzionali Confirmed conservano la conferma peso esplicita,
+  perché restano fuori dal blocco prescritto; gli altri algoritmi mantengono il lifecycle storico;
+- il foglio peso separa PR globale e baseline Confirmed;
+- add/remove non modificano implicitamente la routine;
+- il comando `Usa N serie dal prossimo allenamento` modifica soltanto lo slot stabile della
+  routine per il futuro;
+- la scelta futura resta visibile e può essere sostituita subito tornando al numero di righe
+  precedente, senza un comando ridondante quando righe e futuro coincidono;
+- il target del workout attivo resta congelato e una configurazione condivisa viene separata
+  dalla normalizzazione soltanto quando il nuovo numero di serie diverge;
+- freestyle e slot legacy ambigui non applicano aggiornamenti permanenti per exerciseId.
+
+### 5.4 Test automatici mirati
+
+Comando:
+
+```powershell
+cd frontend
+npm.cmd test -- progression.test.js confirmed-rep-range.integration.test.js `
+  confirmedRepRangeRestProgression.test.js `
+  confirmedRepRangeAutoRest.integration.test.js `
+  progression-scope.test.js progression-scope.integration.test.js `
+  workout-prescription.test.js workout-records.test.js workout-set-status.test.js `
+  workout-scope.test.js plan-share.test.js --run
+```
+
+Risultato:
+
+```text
+Test Files  11 passed (11)
+Tests       285 passed (285)
+Failed      0
+```
+
+Copertura introdotta o estesa:
+
+- matrice target 8/9/10 sotto, uguale e sopra il livello richiesto;
+- due conferme anticipate e incremento singolo esatto;
+- fallimento reale contro incompletezza e relativo recupero;
+- extra set neutral, carichi misti e baseline uniforme;
+- range/per-side, bodyweight, cambio range/carico e automatic recovery;
+- storico legacy completo/incompleto e immutabilità JSON;
+- fallback del peso con snapshot incompleto/misto privo di carico e ultimo carico uniforme sicuro;
+- condivisione e isolamento per `progressionId`, inclusi duplicati;
+- passaggio della baseline al ramo futuro dopo un boundary esplicito sul numero di serie;
+- snapshot normalizzato e lifecycle active → completed;
+- contatori UI puri, serie rimossa, extra, annullamento e riapplicazione del comando futuro;
+- distinzione tra PR globale e carico operativo scoped.
+
+### 5.5 Regressione, build, lingue e diff
+
+Comandi:
+
+```powershell
+cd frontend
+npm.cmd test -- --run
+npm.cmd run build
+node scripts/check-locales.mjs
+cd ..
+git diff --check
+```
+
+Risultati:
+
+- regressione completa: **25 file, 471 test superati, 0 falliti**;
+- build Vite: **SUPERATA**, 117 moduli trasformati;
+- lingue: **11 su 11 sincronizzate**, 717 chiavi ciascuna;
+- diff check: **SUPERATO**; presenti soltanto avvisi informativi LF/CRLF;
+- warning Vite sui chunk grandi: già noto e non bloccante.
+
+### 5.6 Procedura manuale di replica
+
+#### Scenario A — Due conferme anticipate
+
+1. Configurare un esercizio Confirmed con 4 serie, range 8–10, 70 kg e incremento 2 kg.
+2. Avviare la prima sessione e verificare target 8.
+3. Registrare `10/10/10/10` allo stesso peso e terminare.
+4. Verificare che la sessione successiva proponga 70 kg × 10 e mostri conferma 1/2.
+5. Registrare di nuovo `10/10/10/10` a 70 kg.
+6. Verificare che la sessione seguente proponga 72 kg × 8 e streak 0.
+
+La variante storica con target congelati 8 e 9 è coperta dall'integration test: entrambi gli
+snapshot restano byte-per-byte invariati, ma il futuro è 72 kg × 8.
+
+#### Scenario B — Livello minimo realmente dimostrato
+
+1. Con target 8 registrare `9/9/9/9`: il prossimo target deve essere 10.
+2. Ripetere da un backup con `10/10/9/10`: il prossimo target deve essere 10.
+3. Ripetere con `10/9/8/10`: il prossimo target deve essere 9.
+4. Verificare che una singola serie più alta non compensi mai quella più bassa.
+
+#### Scenario C — Fallimento contro incompletezza
+
+1. Con target 8 e recupero 120 s registrare `8/7/8/8`: il prossimo recupero deve essere 150 s.
+2. In una sessione equivalente, rimuovere o lasciare non eseguita una serie prescritta dopo avere
+   completato la prima.
+3. Terminare anticipatamente e verificare che il recupero resti 120 s: la sessione è incompleta,
+   non fallita.
+
+#### Scenario D — Serie opzionale
+
+1. Durante un workout 4×8 aggiungere una quinta serie.
+2. Verificare la label `Opzionale` e il contatore separato nell'header.
+3. Lasciarla non spuntata e terminare: non deve comparire un falso avviso di serie prescritta
+   mancante.
+4. Ripetere completandola con poche ripetizioni o un peso maggiore: target, streak, recupero e
+   baseline devono dipendere soltanto dalle prime quattro serie; il peso maggiore può comparire
+   esclusivamente come PR globale.
+
+#### Scenario E — Carichi manuali
+
+1. Portare tutte le quattro serie prescritte da 70 a 72 kg e completarle: 72 kg diventa il carico
+   operativo futuro.
+2. In un'altra sessione usare `70/70/72/70`: la sessione non deve validare il livello né usare 72
+   come baseline.
+3. Aprire il foglio peso e verificare il testo che distingue record e working load Confirmed.
+
+#### Scenario F — Numero di serie dalla sessione successiva
+
+1. In una routine 4×8 aggiungere una quinta riga durante il workout.
+2. Senza premere il comando permanente, ricaricare/terminare e verificare che la routine resti a
+   quattro serie.
+3. Ripetere, premere `Usa 5 serie dal prossimo allenamento` e verificare il messaggio di conferma.
+4. Verificare che il workout attivo continui ad avere `target.sets = 4` e che la nuova quinta riga
+   resti opzionale.
+5. Avviare il workout successivo: deve prescrivere cinque serie.
+6. Se lo stesso esercizio era condiviso con un'altra routine a quattro serie, verificare che solo
+   lo slot modificato passi a cinque e che le progressioni future risultino separate.
+7. Prima di terminare, rimuovere la quinta riga: devono restare visibili sia `Prossimo
+   allenamento: 5 serie` sia il comando `Usa 4 serie dal prossimo allenamento`.
+8. Riapplicare quattro serie: il comando scompare e resta il riepilogo futuro a quattro, mentre
+   il target del workout attivo non cambia.
+9. In una prova condivisa separata, eseguire le quattro serie prescritte tutte a 72 kg, una extra
+   a 90 kg e applicare cinque serie: il prossimo workout del ramo nuovo deve partire da 72 kg,
+   mai da 70 o 90; il gruppo originale conserva correttamente il risultato del workout attivo.
+
+### 5.7 Gate manuali ancora necessari sull'ambiente reale
+
+Non eseguiti in questa postazione:
+
+- verifica visuale a 320/360/390/430/640 px e con font di sistema ingranditi;
+- screen reader e navigazione completa da tastiera;
+- refresh e sincronizzazione autenticata fra due browser reali durante un workout attivo;
+- Docker/CasaOS down/up con volume persistente;
+- WebView mobile e comportamento del foglio peso su dispositivo fisico.
+
+Questi gate non sostituiscono i test automatici verdi e devono essere eseguiti prima della
+pubblicazione in produzione su CasaOS.
+
+---
+
+## 6. Stato delle release successive
 
 | Release | Requisiti | Stato |
 |---|---|---|
 | A | 6 — identità e gruppi | Implementato, validato e committato; push in attesa di autenticazione GitHub |
-| A | 11 — risultati manuali e Confirmed | Non iniziato in questa iterazione |
+| A | 11 — risultati manuali e Confirmed | Implementato, validato e incluso nel commit dedicato |
 | B | 1, 5, 12, 2A, 4, 10 | Non iniziata |
 | C | 7 | Non iniziata |
 | D | 3, 2B, 2C | Non iniziata |

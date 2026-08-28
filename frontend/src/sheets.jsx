@@ -3,7 +3,7 @@ import { useStore } from './store/useStore.js'
 import { useUI } from './store/useUI.js'
 import { EXDB, EXIDX, BODYPARTS, isCardio, isBodyweightEq, allExercises, equipmentOf } from './lib/exercises.js'
 import { fmtDate, fmtLoad, fmtNum, fmtVol, fmtDur, durPart, todayISO, uid, exCount, DAYN, MONTHS_LONG, ACCENTS } from './lib/format.js'
-import { lastEntryFor, bestWeightFor, effectiveRoutineId, workoutVolume, setsDone, setsDoneActive, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
+import { lastEntryFor, bestWeightFor, effectiveRoutineId, workoutVolume, setsDone, lastBW, supersetUnits, unitOf, setLabel, defaultConfig, cleanupSg, modeOf, effortOf, isBw, isPerSide, sideReps } from './lib/history.js'
 import { beep, vibrate } from './lib/sound.js'
 import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
 import { nav } from './lib/nav.js'
@@ -18,8 +18,9 @@ import { loadOfWorkouts } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
 import { estimate1RM, best1RM, REP_CAP } from './lib/onerm.js'
-import { applyWorkoutWeights, recordsForWorkout } from './lib/workout-records.js'
+import { applyActiveTopWeight, applyWorkoutWeights, recordsForWorkout } from './lib/workout-records.js'
 import { buildScopedWorkoutEntry, completedWorkoutEntries } from './lib/workout-scope.js'
+import { unitPrescribedComplete, workoutSetStatus } from './lib/workout-set-status.js'
 import { nextPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
 import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
 import {
@@ -1119,34 +1120,39 @@ function TopWeight({ entryIdx, close }) {
 
   const units = supersetUnits(A ? A.entries : [])
   const unit = entry ? unitOf(units, entryIdx) : []
-  const unitDone = !!entry && unit.every(i => A.entries[i].sets.every(s => s.done))
+  const unitDone = !!entry && unitPrescribedComplete(A.entries, unit)
   const unitIdx = units.findIndex(u => u === unit)
   const isLastUnit = unitIdx === units.length - 1
   if (!entry || !ex) return null
+  const confirmed = entry.target?.prog === 'confirmed_rep_range'
 
   const commit = advance => {
     const n = roundLoad(v || 0)
     if (!isFinite(n) || n < 0) { toast(t('Enter a valid weight')); return }
     update(s => {
-      s.active.entries[entryIdx].topW = n
-      const cur = s.exWeights[entry.id]
-      s.exWeights[entry.id] = { w: Math.max(n, cur ? cur.w : 0), d: todayISO() }
-      const progressionId = progressionIdOf(entry)
-      s.progressionWeights = s.progressionWeights || {}
-      s.progressionWeights[progressionId] = { w: n, d: todayISO() }
+      const activeEntry = s.active.entries[entryIdx]
+      applyActiveTopWeight(s, activeEntry, n, todayISO())
     })
     close()
     if (advance && unitDone) {
       if (isLastUnit) workoutCompleteSheet()               // whole workout done → finish/continue prompt
       else update(s => { s.active.cur = units[unitIdx + 1][0] })
     } else {
-      const tracked = S().progressionWeights?.[progressionIdOf(entry)]?.w ?? n
-      toast(t('Tracked — next time starts at {0}', fmtLoad(tracked) + ' ' + st.unit))
+      if (confirmed) {
+        toast(t('Weight recorded — it will be applied when the workout finishes'))
+        return
+      }
+      const tracked = S().progressionWeights?.[progressionIdOf(entry)]?.w
+      toast(tracked != null
+        ? t('Tracked — next time starts at {0}', fmtLoad(tracked) + ' ' + st.unit)
+        : t('Weight recorded without changing the progression baseline'))
     }
   }
   return <>
     <h3 className="capitalize row" style={{ gap: 8 }}><Icon name="checkCircle" style={{ color: 'var(--acc)' }} />{t('{0} done', ex.n)}</h3>
-    <div className="muted small">{t('Confirm the weight you worked with — your highest becomes the default next time.')}{!unitDone && unit.length > 1 ? ' ' + t('Then finish the superset partner.') : ''}</div>
+    <div className="muted small">{confirmed
+      ? t('Confirm your top weight for the record. Confirmed Rep-Range changes its working load only when every prescribed set uses the same load.')
+      : t('Confirm the weight you worked with — your highest becomes the default next time.')}{!unitDone && unit.length > 1 ? ' ' + t('Then finish the superset partner.') : ''}</div>
     <WeightInput value={v} setValue={setV} unit={st.unit} load />
     <div style={{ height: 10 }} />
     {prevBest > 0 ? <div className="small dim" style={{ textAlign: 'center', marginBottom: 12 }}>{t('Previous best:')} {fmtLoad(prevBest)} {st.unit}{maxSet > prevBest && <span style={{ color: 'var(--yellow)' }}> — {t('new record!')}</span>}</div> : <div style={{ height: 4 }} />}
@@ -1195,9 +1201,10 @@ function FinishSummary({ w, prs, e1prs = [], close }) {
 export function finishWorkout() {
   const A = S().active
   if (!A) return
-  const done = setsDoneActive(A)
-  const total = A.entries.reduce((n, e) => n + e.sets.length, 0)
-  if (!done) { confirmSheet({ title: t('Nothing logged yet'), message: t('You haven’t checked off any sets. Finish the workout anyway?'), confirmText: t('Finish anyway'), onConfirm: doFinishWorkout }); return }
+  const status = workoutSetStatus(A)
+  const done = status.prescribedDone
+  const total = status.prescribedTotal
+  if (!status.anyLogged) { confirmSheet({ title: t('Nothing logged yet'), message: t('You haven’t checked off any sets. Finish the workout anyway?'), confirmText: t('Finish anyway'), onConfirm: doFinishWorkout }); return }
   if (done < total) { confirmSheet({ title: t('Finish early?'), message: t(total - done === 1 ? '{0} set still unchecked. Finish the workout now?' : '{0} sets still unchecked. Finish the workout now?', total - done), confirmText: t('Finish workout'), onConfirm: doFinishWorkout }); return }
   doFinishWorkout()
 }

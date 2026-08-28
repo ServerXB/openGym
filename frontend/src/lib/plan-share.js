@@ -150,6 +150,7 @@ export function parsePlan(raw) {
       routineExerciseId: _routineExerciseId,
       progressionId: _progressionId,
       progressionSignature: _progressionSignature,
+      setBaselineId: _setBaselineId,
       progressionGroup: rawProgressionGroup,
       ...config
     } = e

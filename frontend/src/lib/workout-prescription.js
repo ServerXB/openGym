@@ -10,6 +10,12 @@ const PLAN_TARGET_FIELDS = [
   'weight',
   'sec',
   'inc',
+  // Confirmed Rep-Range must be auditable from the historical snapshot alone. Materializing
+  // normalized bounds/step here also makes legacy routine configs safe for every new workout.
+  'minReps',
+  'maxReps',
+  'rangeStep',
+  'setBaselineId',
   'restSeconds',
   'restBaseSeconds',
   'restEpochId',

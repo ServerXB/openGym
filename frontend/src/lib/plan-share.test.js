@@ -17,6 +17,7 @@ describe('plan sharing with Confirmed Rep-Range', () => {
       restSeconds: 120,
       maxRestSeconds: 240,
       restReductionStrategy: 'auto_after_successes',
+      setBaselineId: 'private-set-boundary',
       topRangeStreak: 1,
       restEpochId: 'private-epoch',
       restSuccessStreak: 3
@@ -44,6 +45,7 @@ describe('plan sharing with Confirmed Rep-Range', () => {
     expect(exported).not.toHaveProperty('restEpochId')
     expect(exported).not.toHaveProperty('restSuccessStreak')
     expect(exported).not.toHaveProperty('targetReps')
+    expect(exported).not.toHaveProperty('setBaselineId')
     expect(bundle).not.toHaveProperty('progressionControls')
 
     const parsed = parsePlan(JSON.stringify(bundle))

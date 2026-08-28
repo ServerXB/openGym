@@ -7,13 +7,15 @@ describe('workout prescription target snapshot', () => {
       { id: 'squat', sets: 3, reps: 8 },
       {
         policy: 'confirmed_rep_range', sets: 4, weight: 72, reps: 10, inc: 2,
+        minReps: 8, maxReps: 12, rangeStep: 1, setBaselineId: 'sets-boundary-1',
         restSeconds: 120, restBaseSeconds: 90,
         restEpochId: 'epoch-2', restSource: 'manual_reset',
         restReductionStrategy: 'auto_after_successes', restSuccessStreak: 0,
         topRangeStreak: 1
       }
     )).toEqual({
-      id: 'squat', sets: 4, weight: 72, inc: 2,
+      id: 'squat', sets: 4, weight: 72, inc: 2, minReps: 8, maxReps: 12, rangeStep: 1,
+      setBaselineId: 'sets-boundary-1',
       prog: 'confirmed_rep_range', reps: 10, targetReps: 10,
       restSeconds: 120, restBaseSeconds: 90, restEpochId: 'epoch-2', restSource: 'manual_reset',
       restReductionStrategy: 'auto_after_successes', restSuccessStreak: 0, topRangeStreak: 1

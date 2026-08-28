@@ -37,6 +37,7 @@ function state(rows, control) {
         id: ID,
         target: {
           ...cfg,
+          ...(row.snapshot || {}),
           reps: row.target ?? 10,
           targetReps: row.target ?? 10,
           restSeconds: row.rest ?? 180,
@@ -112,8 +113,9 @@ describe('Confirmed Rep-Range automatic recovery integration', () => {
 
   it('remains reachable in a narrow 8–10 range', () => {
     const narrow = { ...cfg, maxReps: 10 }
+    const inNarrowRange = target => clean(target, { snapshot: { maxReps: 10 } })
     const plan = nextPrescription(state([
-      clean(8), clean(9), clean(10), clean(10)
+      inNarrowRange(8), inNarrowRange(9), inNarrowRange(10), inNarrowRange(10)
     ]), narrow)
     expect(plan).toMatchObject({
       weight: 72.5,

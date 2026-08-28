@@ -89,7 +89,10 @@ export default function RoutineEdit() {
               // reconciles progressionId afterwards if the effective progression diverged.
               routineExerciseId: current.routineExerciseId,
               progressionId: current.progressionId,
-              progressionSignature: current.progressionSignature
+              progressionSignature: current.progressionSignature,
+              // An explicit in-workout set-count boundary prevents older bodyweight volume
+              // from resurfacing. It is runtime provenance, not an editable sheet field.
+              ...(current.setBaselineId ? { setBaselineId: current.setBaselineId } : {})
             }
           }), () => edit(x => { x.splice(i, 1); cleanupSg(x) }), r)
         }}>

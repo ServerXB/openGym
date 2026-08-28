@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { exOr } from '../lib/exercises.js'
-import { effectiveRoutine, lastEntryFor, bestWeightFor, buildSets, setsDoneActive, supersetUnits, unitOf, setLabel, modeOf, isBw, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
-import { fmtLoad, fmtNum, fmtDate, todayISO, exCount, DAYN } from '../lib/format.js'
+import { effectiveRoutine, lastEntryFor, bestWeightFor, buildSets, supersetUnits, unitOf, setLabel, modeOf, isBw, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
+import { fmtLoad, fmtNum, fmtDate, todayISO, uid, exCount, DAYN } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { t } from '../lib/i18n.js'
 import { api } from '../lib/api.js'
@@ -17,6 +17,7 @@ import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
 import { loadIncrementForPrescription, targetForPrescription } from '../lib/workout-prescription.js'
 import { progressionScopeSnapshot } from '../lib/progression-scope.js'
+import { applySetCountFromNextWorkout, entrySetStatus, futureSetCountPresentation, invalidateEntryReview, isOptionalSet, prescribedSetCount, unitPrescribedComplete, workoutSetStatus } from '../lib/workout-set-status.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -57,10 +58,13 @@ function Elapsed({ start }) {
 }
 
 /* ---------- one exercise block (reps: weight×reps · time: a held duration · cardio: duration+speed) ---------- */
-function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemoveSet, onStartTimed }) {
+function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemoveSet, onApplySetCount, onStartTimed }) {
   const S = useStore(s => s.S)
   const working = useUI(s => s.work)
   const entry = S.active.entries[entryIdx]
+  const routineConfig = S.routines.find(routine => routine.id === S.active.routineId)?.ex
+    ?.find(config => config.routineExerciseId === entry.routineExerciseId)
+  const setCountPresentation = futureSetCountPresentation(entry, routineConfig)
   const ex = exOr(entry.id)
   const mode = modeOf({ ...(entry.target || {}), id: entry.id })
   const cardio = mode === 'cardio'
@@ -144,7 +148,10 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
     <div className="card" style={{ marginTop: 10, marginBottom: 0 }}>
       {/* the header carries the same eff3 sizing as the rows, or the labels drift off their columns */}
       <div className={'sethead' + (col3 ? ' eff3' : '')}><span className="n-sp" /><span className="w-sp">{col1.hd}</span>{col2 && <span className="r-sp">{col2.hd}</span>}{col3 && <span className="eff-sp">{col3.hd}</span>}{timed && <span className="ck-sp" />}<span className="ck-sp" /></div>
-      {entry.sets.map((s, i) => <div key={i} className={'setrow' + (s.done ? ' done' : '') + (col3 ? ' eff3' : '')}>
+      {entry.sets.map((s, i) => {
+        const optional = isOptionalSet(entry, i)
+        return <div key={i} className={'setrow' + (s.done ? ' done' : '') + (col3 ? ' eff3' : '') + (optional ? ' optional' : '')}>
+        {optional && <span className="optional-set-label">{t('Optional')}</span>}
         <div className="n">{i + 1}</div>
         {cell(s, i, col1, 'w')}
         {col2 && cell(s, i, col2, 'r')}
@@ -154,12 +161,21 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
         {timed && <button className="setgo" aria-label={t('Start set')} disabled={s.done || !!working}
           onClick={() => onStartTimed(i)}><Icon name="play" /></button>}
         <Check checked={s.done} onChange={() => onToggle(i)} />
-      </div>)}
+      </div>})}
       <div style={{ height: 8 }} />
       <div className="row">
         <Button size="sm" icon="minus" disabled={entry.sets.length <= 1} onClick={onRemoveSet}>{t('Remove set')}</Button>
         <Button size="sm" icon="plus" onClick={onAddSet}>{t('Add set')}</Button>
       </div>
+      {setCountPresentation.showFuture && <div className="small dim" style={{ marginTop: 8 }}>
+        {t('Next workout: {0} sets', setCountPresentation.futureCount)}
+      </div>}
+      {setCountPresentation.canApply && <>
+        <div style={{ height: 8 }} />
+        <Button size="sm" variant="ghost" icon="calendar" onClick={onApplySetCount}>
+          {t('Use {0} sets from the next workout', entry.sets.length)}
+        </Button>
+      </>}
     </div>
   </>
 }
@@ -177,24 +193,41 @@ function ActiveWorkout() {
   const unitIdx = units.findIndex(u => u === unit)
   const isSuperset = unit.length > 1
 
-  const total = A.entries.reduce((n, e) => n + e.sets.length, 0)
-  const done = setsDoneActive(A)
+  const status = workoutSetStatus(A)
+  const total = status.prescribedTotal
+  const done = status.prescribedDone
 
   const mutEntry = (idx, fn) => update(s => { fn(s.active.entries[idx]) }, true)
   // Clearing an optional field drops the key rather than storing null, so a set only carries
   // what was actually logged — in the session, in history and in a backup.
   const setField = (idx, i, field, v) => mutEntry(idx, e => {
+    invalidateEntryReview(e, { optionalOnly: isOptionalSet(e, i) })
     if (v == null) delete e.sets[i][field]; else e.sets[i][field] = v
   })
   const modeAt = idx => modeOf({ ...(A.entries[idx].target || {}), id: A.entries[idx].id })
   const addSet = idx => mutEntry(idx, e => {
+    invalidateEntryReview(e, { optionalOnly: isOptionalSet(e, e.sets.length) })
     const l = e.sets[e.sets.length - 1]
     const m = modeOf({ ...(e.target || {}), id: e.id })
     if (m === 'cardio') e.sets.push({ min: l ? l.min : (e.target.min || 20), speed: l ? l.speed : (e.target.speed || 8), done: false })
     else if (m === 'time') e.sets.push({ sec: l ? l.sec : (e.target.sec || 45), w: l ? (l.w || 0) : (e.target.weight || 0), done: false })
     else e.sets.push({ w: l ? l.w : 0, r: l ? l.r : e.target.reps, done: false })
   })
-  const removeSet = idx => mutEntry(idx, e => { if (e.sets.length > 1) e.sets.pop() })
+  const removeSet = idx => mutEntry(idx, e => {
+    if (e.sets.length <= 1) return
+    invalidateEntryReview(e, { optionalOnly: isOptionalSet(e, e.sets.length - 1) })
+    e.sets.pop()
+  })
+  const applySetCount = idx => {
+    let applied = false
+    let count = 0
+    update(s => {
+      const entry = s.active?.entries?.[idx]
+      count = entry?.sets?.length || 0
+      applied = applySetCountFromNextWorkout(s, entry, count, `sets:${uid()}`)
+    })
+    if (applied) useUI.getState().toast(t('{0} sets saved for the next workout', count))
+  }
 
   // A timed set is held, not typed. The work timer records what was actually held — an early
   // finish logs 0:38 of a 0:45 target rather than crediting the full prescription — and then
@@ -214,22 +247,37 @@ function ActiveWorkout() {
     const isLastUnit = unitIdx >= units.length - 1
     let askTop = false, exJustDone = false, workoutDone = false
     mutEntry(idx, e => {
+      const wasPrescribedComplete = entrySetStatus(e).prescribedComplete
+      const optional = isOptionalSet(e, i)
+      invalidateEntryReview(e, { optionalOnly: optional })
       e.sets[i].done = !e.sets[i].done
       if (e.sets[i].done) {
         beep(S.sound, 1040, 0.12); vibrate(30)
         const isLastExInUnit = idx === unit[unit.length - 1]
-        const unitDone = unit.every(ui => (ui === idx ? e : A.entries[ui]).sets.every(x => x.done))
+        const entries = A.entries.map((entry, entryIndex) => entryIndex === idx ? e : entry)
+        if (optional) {
+          const optionalPending = unit.some(entryIndex => {
+            const unitEntry = entries[entryIndex]
+            const prescribed = prescribedSetCount(unitEntry)
+            return unitEntry.sets.slice(prescribed).some(set => !set.done)
+          })
+          if (optionalPending) startRest(restSecondsForUnit(unit.map(ui => entries[ui]), S.restSec))
+          else stopRest()
+          return
+        }
+        const unitDone = unitPrescribedComplete(entries, unit)
         if (isLastExInUnit && !unitDone) {
-          const unitEntries = unit.map(ui => ui === idx ? e : A.entries[ui])
+          const unitEntries = unit.map(ui => entries[ui])
           startRest(restSecondsForUnit(unitEntries, S.restSec))
         }
         else if (unitDone) stopRest()
-        if (unitDone && isLastUnit) workoutDone = true      // last exercise's last set → done
+        if (unitDone && isLastUnit) workoutDone = workoutSetStatus({ entries }).allPrescribedComplete
         // Only loaded reps training has a "working weight" worth confirming — a bodyweight
         // plank has nothing to put in that slider, and neither does a set of push-ups
         // (issue #32: the fewest taps that still record what happened).
         const loaded = m === 'reps' && !(isBw({ ...(e.target || {}), id: e.id }) && !e.sets.some(x => x.w > 0))
-        if (e.sets.every(x => x.done)) { exJustDone = true; if (loaded && !e.asked) { e.asked = true; askTop = true } }
+        const prescribedJustCompleted = !wasPrescribedComplete && entrySetStatus(e).prescribedComplete
+        if (prescribedJustCompleted) { exJustDone = true; if (loaded && !e.asked) { e.asked = true; askTop = true } }
       }
     })
     // reps: topWeight first (it chains into the finish/continue prompt on the last unit).
@@ -251,10 +299,10 @@ function ActiveWorkout() {
       const u = supersetUnits(A2.entries)
       const c = Math.min(A2.cur, Math.max(0, A2.entries.length - 1))
       const ui = u.findIndex(x => x.includes(c))
-      const tot = A2.entries.reduce((n, e) => n + e.sets.length, 0)
+      const setStatus = workoutSetStatus(A2)
       api('/api/activity', { method: 'POST', body: JSON.stringify({
         active, name: A2.name, exIdx: ui + 1, exTotal: u.length,
-        setsDone: setsDoneActive(A2), setsTotal: tot, startedAt: A2.start
+        setsDone: setStatus.prescribedDone, setsTotal: setStatus.prescribedTotal, startedAt: A2.start
       }) }).catch(() => {})
     }
     ping(true)
@@ -270,7 +318,7 @@ function ActiveWorkout() {
   return <div className="narrow">
     <div className="hdr">
       <button className="iconbtn" aria-label={t('Discard')} onClick={() => confirmSheet({ title: t('Discard workout?'), message: t('The sets you logged in this session will be lost.'), confirmText: t('Discard'), danger: true, onConfirm: () => { update(s => { s.active = null }); stopRest(); nav('/home') } })}><Icon name="xmark" /></button>
-      <div style={{ textAlign: 'center' }}><div style={{ fontWeight: 600 }}>{A.name}</div><div className="sub"><Elapsed start={A.start} /> · {t('{0} sets', done + '/' + total)}</div></div>
+      <div style={{ textAlign: 'center' }}><div style={{ fontWeight: 600 }}>{A.name}</div><div className="sub"><Elapsed start={A.start} /> · {t('{0} sets', done + '/' + total)}{status.optionalTotal > 0 ? ' · ' + status.optionalDone + '/' + status.optionalTotal + ' ' + t('Optional') : ''}</div></div>
       <button className="iconbtn" style={{ color: 'var(--acc)' }} aria-label={t('Finish')} onClick={finishWorkout}><Icon name="check" /></button>
     </div>
     <div className="wprog"><i style={{ width: (total ? done / total * 100 : 0) + '%' }} /></div>
@@ -283,11 +331,11 @@ function ActiveWorkout() {
           {unit.map((idx, k) => <div key={idx} className="ss-ex">
             {k > 0 && <div className="ss-amp">+</div>}
             <ExerciseBlock entryIdx={idx} compact
-              onToggle={i => toggle(idx, i)} onField={(i, f, v) => setField(idx, i, f, v)} onAddSet={() => addSet(idx)} onRemoveSet={() => removeSet(idx)} onStartTimed={i => startTimed(idx, i)} />
+              onToggle={i => toggle(idx, i)} onField={(i, f, v) => setField(idx, i, f, v)} onAddSet={() => addSet(idx)} onRemoveSet={() => removeSet(idx)} onApplySetCount={() => applySetCount(idx)} onStartTimed={i => startTimed(idx, i)} />
           </div>)}
         </div>
       ) : (
-        <ExerciseBlock entryIdx={cur} onToggle={i => toggle(cur, i)} onField={(i, f, v) => setField(cur, i, f, v)} onAddSet={() => addSet(cur)} onRemoveSet={() => removeSet(cur)} onStartTimed={i => startTimed(cur, i)} />
+        <ExerciseBlock entryIdx={cur} onToggle={i => toggle(cur, i)} onField={(i, f, v) => setField(cur, i, f, v)} onAddSet={() => addSet(cur)} onRemoveSet={() => removeSet(cur)} onApplySetCount={() => applySetCount(cur)} onStartTimed={i => startTimed(cur, i)} />
       )}
     </> : <div className="empty"><div className="ico"><Icon name="shuffle" /></div>{t('Freestyle workout — add your first exercise.')}</div>}
 
@@ -314,8 +362,8 @@ function ActiveWorkout() {
     }), null, S.routines.find(r => r.id === A.routineId)))} icon="plus">{t('Add exercise')}</Button>
     <div style={{ height: 10 }} />
     {(() => {
-      const exDone = A.entries.filter(e => e.sets.length && e.sets.every(s => s.done)).length
-      const allDone = A.entries.length > 0 && exDone === A.entries.length
+      const exDone = status.exercisesComplete
+      const allDone = status.allPrescribedComplete
       return <button className={allDone ? 'btn primary' : 'btn ghost dim'} onClick={finishWorkout}>
         {allDone ? t('Finish workout') : t('Finish workout early · {0} exercises', exDone + '/' + A.entries.length)}
       </button>

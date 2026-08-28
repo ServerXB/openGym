@@ -3,6 +3,9 @@ import { normalizeProgressionScopes, progressionScopeSnapshot } from './progress
 import { nextPrescription } from './progression.js'
 import { confirmedRepRangeRestControl, resetConfirmedRepRangeRest } from './confirmedRepRangeRest.js'
 import { targetForPrescription } from './workout-prescription.js'
+import { applyWorkoutWeights } from './workout-records.js'
+import { completedWorkoutEntries } from './workout-scope.js'
+import { applySetCountFromNextWorkout } from './workout-set-status.js'
 
 const ID = 'scope-integration-lift'
 const confirmed = (overrides = {}) => ({
@@ -47,6 +50,58 @@ describe('progression scopes across the workout lifecycle', () => {
     expect(nextPrescription(S, b, S.routines[1])).toMatchObject({ weight: 70, reps: 9 })
   })
 
+  it('carries the active working load into an explicit future set-count branch', () => {
+    const S = {
+      unit: 'kg', restSec: 90, workouts: [], progressionControls: {}, exWeights: {},
+      progressionWeights: {},
+      routines: [{ id: 'a', ex: [confirmed({ sets: 4 })] }, { id: 'b', ex: [confirmed({ sets: 4 })] }]
+    }
+    normalizeProgressionScopes(S)
+    const [a, b] = S.routines.map(routine => routine.ex[0])
+    const sharedProgressionId = a.progressionId
+    expect(b.progressionId).toBe(sharedProgressionId)
+    S.progressionWeights[sharedProgressionId] = { w: 70, d: '2026-08-01' }
+
+    const plan = nextPrescription(S, a, S.routines[0])
+    const activeEntry = {
+      id: ID,
+      ...progressionScopeSnapshot(a),
+      target: targetForPrescription(a, plan),
+      plan,
+      sets: [
+        ...Array.from({ length: 4 }, () => ({ w: 72, r: 10, done: true })),
+        // Optional work may establish a global PR, but must not become either scoped baseline.
+        { w: 90, r: 5, done: true }
+      ]
+    }
+    S.active = { routineId: 'a', entries: [activeEntry] }
+
+    expect(applySetCountFromNextWorkout(S, activeEntry, 5, 'sets:future-five')).toBe(true)
+    normalizeProgressionScopes(S)
+    const futureA = S.routines[0].ex[0]
+    const unchangedB = S.routines[1].ex[0]
+    expect(activeEntry.progressionId).toBe(sharedProgressionId)
+    expect(activeEntry.target).not.toHaveProperty('setBaselineId')
+    expect(futureA.progressionId).not.toBe(sharedProgressionId)
+    expect(unchangedB.progressionId).toBe(sharedProgressionId)
+    expect(S.progressionWeights[futureA.progressionId].w).toBe(70)
+
+    const finishedEntries = completedWorkoutEntries([activeEntry])
+    applyWorkoutWeights(S, finishedEntries, '2026-08-27')
+    S.workouts.push({ routineId: 'a', d: '2026-08-27', entries: finishedEntries })
+    S.active = null
+
+    // The workout remains historical evidence for the old shared group. Its proven 72 kg
+    // working load is also handed to A's explicit successor, without promoting the 90 kg
+    // optional set or assigning the new branch to B.
+    expect(S.progressionWeights[sharedProgressionId]).toEqual({ w: 72, d: '2026-08-27' })
+    expect(S.progressionWeights[futureA.progressionId]).toEqual({ w: 72, d: '2026-08-27' })
+    expect(nextPrescription(S, futureA, S.routines[0])).toMatchObject({
+      kind: 'first', weight: 72, reps: 8
+    })
+    expect(nextPrescription(S, unchangedB, S.routines[1])).toMatchObject({ weight: 72 })
+  })
+
   it('shares top-range streak and adaptive recovery only while configurations share a group', () => {
     const S = {
       unit: 'kg', restSec: 90, workouts: [], progressionControls: {}, exWeights: {},
@@ -75,7 +130,7 @@ describe('progression scopes across the workout lifecycle', () => {
     expect(nextPrescription(S, b, S.routines[1])).toMatchObject({ kind: 'first', reps: 8 })
   })
 
-  it('credits shared top-range confirmations across compatible routines', () => {
+  it('credits early top-range confirmations across compatible routines', () => {
     const S = {
       unit: 'kg', restSec: 90, workouts: [], progressionControls: {}, exWeights: {},
       routines: [{ id: 'a', ex: [confirmed()] }, { id: 'b', ex: [confirmed()] }]
@@ -83,8 +138,8 @@ describe('progression scopes across the workout lifecycle', () => {
     normalizeProgressionScopes(S)
     const [a, b] = S.routines.map(routine => routine.ex[0])
     S.workouts.push(
-      { routineId: 'a', d: '2026-08-01', entries: [completed(a, 10, [10, 10, 10])] },
-      { routineId: 'b', d: '2026-08-08', entries: [completed(b, 10, [10, 10, 10])] }
+      { routineId: 'a', d: '2026-08-01', entries: [completed(a, 8, [10, 10, 10])] },
+      { routineId: 'b', d: '2026-08-08', entries: [completed(b, 9, [10, 10, 10])] }
     )
     expect(nextPrescription(S, a, S.routines[0])).toMatchObject({
       weight: 72, reps: 8, topRangeStreak: 0

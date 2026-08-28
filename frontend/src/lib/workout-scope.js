@@ -30,4 +30,7 @@ export function completedWorkoutEntry(entry) {
 export const completedWorkoutEntries = entries =>
   (entries || []).map(completedWorkoutEntry).filter(entry =>
     (entry.sets || []).some(set => set.done)
+    // A fully skipped Confirmed prescription is meaningful incomplete history: omitting it
+    // would let two top successes on either side combine into a false load increase.
+    || entry.target?.prog === 'confirmed_rep_range'
   )

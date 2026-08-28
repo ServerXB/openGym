@@ -474,8 +474,15 @@ describe('Confirmed Rep-Range progression', () => {
       d: `2026-02-${String(i + 1).padStart(2, '0')}`,
       entries: [{
         id: LIFT,
-        target: { ...cfg, reps: x.target, targetReps: x.target, restSeconds: x.rest ?? 120, topRangeStreak: x.streak ?? 0 },
-        sets: x.reps.map(r => r == null ? { w: x.weight ?? 70, r: 0, done: false } : { w: x.weight ?? 70, r, done: true })
+        target: {
+          ...cfg, ...(x.snapshot || {}),
+          sets: x.planned ?? x.snapshot?.sets ?? cfg.sets,
+          reps: x.target, targetReps: x.target,
+          restSeconds: x.rest ?? 120, topRangeStreak: x.streak ?? 0
+        },
+        sets: x.reps.map((r, setIndex) => r == null
+          ? { w: x.weights?.[setIndex] ?? x.weight ?? 70, r: 0, done: false }
+          : { w: x.weights?.[setIndex] ?? x.weight ?? 70, r, done: true })
       }]
     }))
   })
@@ -558,8 +565,236 @@ describe('Confirmed Rep-Range progression', () => {
     expect(confirmedRepRangeSession(state([{ target: 10, reps: [10, 10, null] }]).workouts[0].entries[0], cfg).ok).toBe(false)
   })
 
-  it('does not let extra completed reps skip an intermediate target', () => {
-    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [12, 12, 12] }]), cfg).reps).toBe(9)
+  it('credits the highest level demonstrated by every prescribed set', () => {
+    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [12, 12, 12] }]), cfg)).toMatchObject({
+      kind: 'hold', reps: 12, topRangeStreak: 1
+    })
+  })
+
+  describe('validated demonstrated level (RF-11.1)', () => {
+    const shortCfg = { ...cfg, sets: 4, minReps: 8, maxReps: 10, inc: 2 }
+    const shortState = rows => state(rows.map(row => ({
+      planned: 4,
+      snapshot: { minReps: 8, maxReps: 10, rangeStep: 1, sets: 4 },
+      ...row
+    })))
+
+    it.each([
+      [[7, 8, 8, 8], 'failed', null, 8],
+      [[8, 8, 8, 8], 'success', 8, 9],
+      [[9, 9, 9, 9], 'success', 9, 10],
+      [[10, 10, 9, 10], 'success', 9, 10],
+      [[10, 9, 8, 10], 'success', 8, 9],
+      [[10, 10, 10, 10], 'top_range_success', 10, 10],
+      [[11, 12, 10, 15], 'top_range_success', 10, 10]
+    ])('classifies target 8 with reps %j as %s at level %s', (reps, outcome, validatedReps, nextReps) => {
+      const S = shortState([{ target: 8, reps }])
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)).toMatchObject({
+        outcome, validatedReps
+      })
+      expect(confirmedRepRangeProgression(S, shortCfg).reps).toBe(nextReps)
+    })
+
+    it.each([
+      [8, [9, 9, 9, 9], 10],
+      [8, [10, 10, 9, 10], 10],
+      [8, [10, 9, 8, 10], 9],
+      [9, [9, 9, 9, 9], 10],
+      [9, [10, 10, 10, 10], 10]
+    ])('advances target %i from the minimum result across prescribed sets', (target, reps, next) => {
+      expect(confirmedRepRangeProgression(shortState([{ target, reps }]), shortCfg).reps).toBe(next)
+    })
+
+    it('treats historical target 8 and 9 sessions performed at 10 as two confirmations', () => {
+      const S = shortState([
+        { target: 8, reps: [10, 10, 10, 10] },
+        { target: 9, reps: [10, 10, 10, 10] }
+      ])
+      const snapshots = JSON.stringify(S.workouts)
+
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'up', weight: 72, reps: 8, topRangeStreak: 0
+      })
+      expect(JSON.stringify(S.workouts)).toBe(snapshots)
+    })
+
+    it('counts one above-range workout as exactly one top confirmation', () => {
+      expect(confirmedRepRangeProgression(shortState([
+        { target: 8, reps: [14, 14, 14, 14] }
+      ]), shortCfg)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 10, topRangeStreak: 1
+      })
+    })
+
+    it.each([
+      [[10, 10, 10], 'incomplete'],
+      [[10, 10, null, 10], 'incomplete']
+    ])('does not turn a missing prescribed row %j into an adaptive failure', (reps, outcome) => {
+      const S = shortState([{ target: 8, reps }])
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg).outcome).toBe(outcome)
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', reps: 8, restSeconds: 120
+      })
+    })
+
+    it('adds recovery only for a real later-set miss', () => {
+      expect(confirmedRepRangeProgression(shortState([
+        { target: 8, reps: [8, 7, 8, 8] }
+      ]), shortCfg)).toMatchObject({ kind: 'hold', reps: 8, restSeconds: 150 })
+    })
+
+    it.each([
+      [10, true],
+      [1, true],
+      [null, false]
+    ])('keeps an optional fifth set (%s, done=%s) neutral', (extraReps, _done) => {
+      const S = shortState([{ target: 8, reps: [9, 9, 9, 9, extraReps] }])
+      const session = confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)
+      expect(session).toMatchObject({ outcome: 'success', validatedReps: 9, planned: 4 })
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({ reps: 10, restSeconds: 120 })
+    })
+
+    it('accepts a uniform manual load as the new baseline', () => {
+      expect(confirmedRepRangeProgression(shortState([
+        { target: 8, reps: [9, 9, 9, 9], weight: 72 }
+      ]), shortCfg)).toMatchObject({ weight: 72, reps: 10 })
+    })
+
+    it('holds the frozen load and target when prescribed loads are mixed', () => {
+      const S = shortState([{
+        target: 8, reps: [10, 10, 10, 10], weights: [70, 70, 72, 70]
+      }])
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)).toMatchObject({
+        outcome: 'mixed_load', loadUniform: false, workingWeight: null, weight: 70
+      })
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 8, topRangeStreak: 0, restSeconds: 120
+      })
+    })
+
+    it('starts a fresh top confirmation when the uniform working load changes', () => {
+      expect(confirmedRepRangeProgression(shortState([
+        { target: 8, reps: [10, 10, 10, 10], weight: 70 },
+        { target: 10, reps: [10, 10, 10, 10], weight: 72 }
+      ]), shortCfg)).toMatchObject({
+        kind: 'hold', weight: 72, reps: 10, topRangeStreak: 1
+      })
+    })
+
+    it.each([
+      [{ target: 8, reps: [8, 7, 8, 8] }, 'failed'],
+      [{ target: 8, reps: [8, 8, null, 8] }, 'incomplete'],
+      [{ target: 8, reps: [9, 9, 9, 9] }, 'success']
+    ])('breaks a previous top streak on a following %s session', (boundary, outcome) => {
+      const S = shortState([
+        { target: 8, reps: [10, 10, 10, 10] },
+        boundary,
+        { target: 8, reps: [10, 10, 10, 10] }
+      ])
+      expect(confirmedRepRangeSession(S.workouts[1].entries[0], shortCfg).outcome).toBe(outcome)
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', reps: 10, topRangeStreak: 1
+      })
+    })
+
+    it('lets a fully skipped finished prescription break two top confirmations', () => {
+      const S = shortState([
+        { target: 8, reps: [10, 10, 10, 10] },
+        { target: 10, reps: [null, null, null, null] },
+        { target: 10, reps: [10, 10, 10, 10] }
+      ])
+
+      expect(confirmedRepRangeSession(S.workouts[1].entries[0], shortCfg).outcome).toBe('incomplete')
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 10, topRangeStreak: 1
+      })
+    })
+
+    it('keeps a real later-set failure and adaptive recovery even when loads are mixed', () => {
+      const S = shortState([{
+        target: 8, reps: [8, 7, 8, 8], weights: [70, 72, 70, 70]
+      }])
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)).toMatchObject({
+        outcome: 'failed', loadUniform: false, workingWeight: null
+      })
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 8, restSeconds: 150
+      })
+    })
+
+    it('falls back to the scoped operational load when an old mixed snapshot has no weight', () => {
+      const scoped = { ...shortCfg, progressionId: 'pg-short' }
+      const S = shortState([{
+        target: 8, reps: [10, 10, 10, 10], weights: [70, 72, 70, 70]
+      }])
+      S.workouts[0].entries[0].progressionId = 'pg-short'
+      delete S.workouts[0].entries[0].target.weight
+      S.progressionWeights = { 'pg-short': { w: 70, d: '2026-08-01' } }
+
+      expect(confirmedRepRangeProgression(S, scoped)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 8
+      })
+    })
+
+    it.each([
+      ['incomplete', [8, null, null, null], [100, 100, 100, 100]],
+      ['mixed', [8, 8, 8, 8], [100, 102, 100, 100]]
+    ])('never promotes an isolated %s Confirmed load when its snapshot weight is missing', (_case, reps, weights) => {
+      const S = shortState([{ target: 8, reps, weights }])
+      delete S.workouts[0].entries[0].target.weight
+
+      expect(S.progressionWeights).toBeUndefined()
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', weight: 70, reps: 8
+      })
+    })
+
+    it('uses the last complete uniform Confirmed load behind an unsafe current workout', () => {
+      const S = shortState([
+        { target: 8, reps: [9, 9, 9, 9], weight: 72 },
+        { target: 9, reps: [9, null, null, null], weights: [100, 100, 100, 100] }
+      ])
+      delete S.workouts[1].entries[0].target.weight
+
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', weight: 72, reps: 9
+      })
+    })
+
+    it('does not invent the minimum when a malformed historical result is below the range', () => {
+      const S = shortState([{ target: 7, reps: [7, 7, 7, 7] }])
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)).toMatchObject({
+        outcome: 'below_range_success', validatedReps: null
+      })
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'hold', reps: 8, topRangeStreak: 0
+      })
+    })
+
+    it('starts a changed range instead of reinterpreting an out-of-range legacy target', () => {
+      const S = shortState([{ target: 8, reps: [10, 10, 10, 10] }])
+      delete S.workouts[0].entries[0].target.minReps
+      delete S.workouts[0].entries[0].target.maxReps
+      delete S.workouts[0].entries[0].target.rangeStep
+
+      expect(confirmedRepRangeProgression(S, { ...shortCfg, minReps: 10, maxReps: 15 })).toMatchObject({
+        kind: 'first', weight: 70, reps: 10, topRangeStreak: 0
+      })
+    })
+
+    it('does not accelerate a legacy snapshot whose rep range is missing', () => {
+      const S = shortState([{ target: 8, reps: [10, 10, 10, 10] }])
+      delete S.workouts[0].entries[0].target.minReps
+      delete S.workouts[0].entries[0].target.maxReps
+      delete S.workouts[0].entries[0].target.rangeStep
+
+      expect(confirmedRepRangeSession(S.workouts[0].entries[0], shortCfg)).toMatchObject({
+        outcome: 'legacy_success', rangeKnown: false, validatedReps: null
+      })
+      expect(confirmedRepRangeProgression(S, shortCfg)).toMatchObject({
+        kind: 'up', reps: 9, topRangeStreak: 0
+      })
+    })
   })
 
   it('uses the historical snapshot target even when routine targetReps disagrees', () => {
@@ -569,16 +804,15 @@ describe('Confirmed Rep-Range progression', () => {
     expect(confirmedRepRangeProgression(S, { ...cfg, targetReps: 8 }).reps).toBe(11)
   })
 
-  it('preserves the existing no-baseline behavior after a structural range edit', () => {
+  it('starts the edited range without reinterpreting an older snapshot', () => {
     const S = state([{ target: 8, reps: [8, 8, 8] }])
     const historyBefore = JSON.stringify(S.workouts)
     const controlsBefore = JSON.stringify(S.progressionControls)
 
-    // A future explicit baseline feature is intentionally out of scope. Until then the old
-    // successful snapshot is clamped by the existing engine and advances normally; editing
-    // the range must not silently create a marker or rewrite that snapshot.
+    // The previous workout keeps its own 8–12 range. A new 10–15 range starts from its minimum
+    // and preserves only the operational load; no marker or historical rewrite is needed.
     expect(confirmedRepRangeProgression(S, { ...cfg, minReps: 10, maxReps: 15 })).toMatchObject({
-      kind: 'up', reps: 11, weight: 70
+      kind: 'first', reps: 10, weight: 70
     })
     expect(JSON.stringify(S.workouts)).toBe(historyBefore)
     expect(JSON.stringify(S.progressionControls)).toBe(controlsBefore)
@@ -602,18 +836,20 @@ describe('Confirmed Rep-Range progression', () => {
 
   it('advances total-per-side targets by two through the range', () => {
     const sideCfg = { ...cfg, side: true, minReps: 16, maxReps: 20, targetReps: 19 }
-    expect(confirmedRepRangeProgression(state([{ target: 16, reps: [16, 16, 16] }]), sideCfg).reps).toBe(18)
-    expect(confirmedRepRangeProgression(state([{ target: 18, reps: [18, 18, 18] }]), sideCfg).reps).toBe(20)
+    const snapshot = { side: true, minReps: 16, maxReps: 20, rangeStep: 2 }
+    expect(confirmedRepRangeProgression(state([{ target: 16, reps: [16, 16, 16], snapshot }]), sideCfg).reps).toBe(18)
+    expect(confirmedRepRangeProgression(state([{ target: 18, reps: [18, 18, 18], snapshot }]), sideCfg).reps).toBe(20)
   })
 
   it('supports a fixed range with two confirmations before increasing load', () => {
     const fixed = { ...cfg, minReps: 8, maxReps: 8, targetReps: 12, inc: 2 }
-    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [8, 8, 8] }]), fixed)).toMatchObject({
+    const snapshot = { minReps: 8, maxReps: 8 }
+    expect(confirmedRepRangeProgression(state([{ target: 8, reps: [8, 8, 8], snapshot }]), fixed)).toMatchObject({
       kind: 'hold', weight: 70, reps: 8, topRangeStreak: 1
     })
     expect(confirmedRepRangeProgression(state([
-      { target: 8, reps: [8, 8, 8] },
-      { target: 8, reps: [8, 8, 8] }
+      { target: 8, reps: [8, 8, 8], snapshot },
+      { target: 8, reps: [8, 8, 8], snapshot }
     ]), fixed)).toMatchObject({ kind: 'up', weight: 72, reps: 8, topRangeStreak: 0 })
   })
 
@@ -626,6 +862,25 @@ describe('Confirmed Rep-Range progression', () => {
 
     expect(p).toMatchObject({ kind: 'up', weight: 0, reps: 8, sets: 4, topRangeStreak: 0 })
     expect(p.why[0]).toMatch(/add a set/)
+  })
+
+  it('honours an explicit future set-count boundary after bodyweight volume had grown', () => {
+    const bodyweight = {
+      ...cfg, sets: 3, bodyweight: true, weight: 0, inc: 2,
+      setBaselineId: 'sets-reset-to-three'
+    }
+    const S = state([
+      { target: 12, reps: [12, 12, 12], weight: 0 },
+      { target: 12, reps: [12, 12, 12], weight: 0 },
+      { target: 8, reps: [8, 8, 8, 8], weight: 0, planned: 4 }
+    ])
+    S.workouts[2].entries[0].target.sets = 4
+    S.exWeights = {}
+
+    const plan = confirmedRepRangeProgression(S, bodyweight)
+    expect(plan).toMatchObject({ kind: 'first', weight: 0, reps: 8, setBaselineId: 'sets-reset-to-three' })
+    expect(plan.sets).toBeUndefined()
+    expect(applyPrescription(buildSets(S, bodyweight), plan)).toHaveLength(3)
   })
 
   it('keeps the added Confirmed bodyweight set throughout the following range', () => {
@@ -658,10 +913,11 @@ describe('Confirmed Rep-Range progression', () => {
 
   it('keeps an odd legacy per-side target after failure and moves to the next even target after success', () => {
     const sideCfg = { ...cfg, side: true, minReps: 16, maxReps: 20 }
-    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 16, 17] }]), sideCfg)).toMatchObject({
+    const snapshot = { side: true, minReps: 16, maxReps: 20, rangeStep: 2 }
+    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 16, 17], snapshot }]), sideCfg)).toMatchObject({
       kind: 'hold', reps: 17
     })
-    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 17, 17] }]), sideCfg)).toMatchObject({
+    expect(confirmedRepRangeProgression(state([{ target: 17, reps: [17, 17, 17], snapshot }]), sideCfg)).toMatchObject({
       kind: 'up', reps: 18
     })
   })

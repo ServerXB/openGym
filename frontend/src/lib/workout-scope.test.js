@@ -36,4 +36,19 @@ describe('workout progression scope lifecycle', () => {
     expect(completed).not.toHaveProperty('routineExerciseId')
     expect(completed).not.toHaveProperty('progressionId')
   })
+
+  it('retains a fully skipped Confirmed prescription but still omits unlogged other policies', () => {
+    const confirmed = {
+      id: 'confirmed', target: { prog: 'confirmed_rep_range', sets: 2, targetReps: 8 },
+      sets: [{ w: 70, r: 8, done: false }, { w: 70, r: 8, done: false }]
+    }
+    const linear = {
+      id: 'linear', target: { prog: 'linear', sets: 2, reps: 5 },
+      sets: [{ w: 70, r: 5, done: false }, { w: 70, r: 5, done: false }]
+    }
+
+    expect(completedWorkoutEntries([confirmed, linear])).toEqual([
+      expect.objectContaining({ id: 'confirmed', target: confirmed.target, sets: confirmed.sets })
+    ])
+  })
 })

@@ -203,26 +203,118 @@ export function stallCount(sessions) {
   return n
 }
 
+const snapshotPositiveInt = value => {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? Math.max(1, Math.round(n)) : null
+}
+
+const snapshotLoad = value => {
+  if (value == null || value === '') return null
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? roundLoad(n) : null
+}
+
+const snapshotId = value => typeof value === 'string' && value.trim() ? value.trim() : null
+
+// A historical range is usable only when the historical snapshot actually contains it. Never
+// fill a missing bound from today's routine: doing so would turn an old 8-rep result into a new
+// 8-10 confirmation after the fact. `repsMin/repsMax` are accepted as old persisted spellings.
+function confirmedSnapshotRange(snapshot) {
+  if (!snapshot) return null
+  const minReps = snapshotPositiveInt(snapshot.minReps ?? snapshot.repsMin)
+  const maxReps = snapshotPositiveInt(snapshot.maxReps ?? snapshot.repsMax)
+  if (minReps == null || maxReps == null || maxReps < minReps) return null
+  const explicitStep = snapshotPositiveInt(snapshot.rangeStep)
+  const step = explicitStep || repStep(snapshot)
+  return { minReps, maxReps, step, key: `${minReps}:${maxReps}:${step}` }
+}
+
+const sameLoad = (a, b) => a != null && b != null && Math.abs(a - b) < 1e-8
+
 // Confirmed Rep-Range deliberately judges only the prescribed sets. Extra sets are optional
 // work: they neither rescue a missed prescription nor turn an otherwise clean session into a
-// miss. This also makes the rule stable when a user adds an AMRAP/back-off set.
+// miss. Modern snapshots are rich enough to credit the highest range level demonstrated by
+// every prescribed set; incomplete legacy snapshots remain readable but never receive invented
+// range credit from the current routine configuration.
 export function confirmedRepRangeSession(entry, fallback) {
-  const snapshot = entry && entry.target
-  const target = snapshot || fallback || {}
-  const planned = Math.max(1, target.sets || fallback?.sets || 1)
-  // A workout snapshot records what was actually prescribed and is therefore authoritative.
-  // A legacy targetReps on routine configuration is deliberately ignored: without a snapshot,
-  // Confirmed Rep-Range now starts deterministically from minReps.
-  const goal = Math.max(1, snapshot
-    ? (snapshot.targetReps || snapshot.reps || fallback?.minReps || 1)
-    : (fallback?.minReps || 1))
-  const prescribed = ((entry && entry.sets) || []).slice(0, planned)
-  const hit = s => !!s?.done && (s.r || 0) >= goal
+  const snapshot = entry?.target || null
+  const target = snapshot || {}
+  const rows = Array.isArray(entry?.sets) ? entry.sets : []
+  const snapshotPlanned = snapshotPositiveInt(target.sets)
+  const planned = snapshotPlanned || Math.max(1, rows.length || 1)
+  const goal = snapshotPositiveInt(target.targetReps ?? target.reps)
+  const range = confirmedSnapshotRange(snapshot)
+  const setBaselineId = snapshotId(target.setBaselineId)
+  const prescribed = rows.slice(0, planned)
+  const complete = snapshotPlanned != null
+    && prescribed.length === planned
+    && prescribed.every(set => !!set?.done)
+  const reps = complete ? prescribed.map(set => Math.max(0, Number(set.r) || 0)) : []
+  const loads = complete ? prescribed.map(set => snapshotLoad(set.w)) : []
+  const loadKnown = complete && loads.every(load => load != null)
+  const loadUniform = loadKnown && loads.every(load => sameLoad(load, loads[0]))
+  const prescribedWeight = snapshotLoad(target.weight)
+  const workingWeight = loadUniform ? loads[0] : null
+  const minCompletedReps = reps.length ? Math.min(...reps) : null
+  const firstHit = goal != null && !!prescribed[0]?.done && (Number(prescribed[0].r) || 0) >= goal
+  const laterMiss = goal != null && prescribed.slice(1).some(set =>
+    !!set?.done && (Number(set.r) || 0) < goal
+  )
+
+  let outcome = 'incomplete'
+  let validatedReps = null
+  if (complete && goal == null) outcome = 'legacy_unknown'
+  else if (complete && minCompletedReps < goal) outcome = 'failed'
+  else if (complete && !loadUniform) outcome = 'mixed_load'
+  else if (complete && range && minCompletedReps < range.minReps) {
+    // A malformed/old target below the frozen range can be successful on its own terms, but it
+    // has not demonstrated any valid level in that range.
+    outcome = 'below_range_success'
+  }
+  else if (complete && range) {
+    const bounded = Math.min(range.maxReps, minCompletedReps)
+    validatedReps = Math.min(
+      range.maxReps,
+      range.minReps + Math.floor((bounded - range.minReps) / range.step) * range.step
+    )
+    outcome = validatedReps >= range.maxReps ? 'top_range_success' : 'success'
+  } else if (complete) {
+    // Enough historical data to preserve the old sequential success/failure decision, but not
+    // enough to award an accelerated level or a top-range confirmation.
+    outcome = 'legacy_success'
+  }
+
+  const ok = outcome === 'success'
+    || outcome === 'top_range_success'
+    || outcome === 'below_range_success'
+    || outcome === 'legacy_success'
   return {
-    goal, planned,
-    weight: Math.max(0, ...prescribed.filter(s => s?.done).map(s => s.w || 0)),
-    firstOk: hit(prescribed[0]),
-    ok: prescribed.length === planned && prescribed.every(hit),
+    goal: goal || 0,
+    planned,
+    prescribedSets: planned,
+    complete,
+    minCompletedReps,
+    validatedReps,
+    rangeKnown: !!range,
+    rangeMin: range?.minReps ?? null,
+    rangeMax: range?.maxReps ?? null,
+    rangeStep: range?.step ?? null,
+    rangeKey: range?.key ?? null,
+    setBaselineId,
+    progressionKey: range ? `${range.key}|sets:${setBaselineId || 'legacy'}` : null,
+    loadUniform,
+    workingWeight,
+    prescribedWeight,
+    // A complete uniform manual change becomes the operational baseline. Mixed/incomplete
+    // work holds the frozen prescribed weight and never promotes an isolated maximum.
+    weight: workingWeight ?? prescribedWeight ?? 0,
+    firstHit,
+    firstOk: firstHit,
+    laterMiss,
+    topRangeSuccess: outcome === 'top_range_success',
+    outcome,
+    ok,
     restSeconds: Math.max(0, target.restSeconds ?? fallback?.restSeconds ?? 0),
     maxRestSeconds: Math.max(0, target.maxRestSeconds ?? fallback?.maxRestSeconds ?? 0),
     restEpochId: typeof target.restEpochId === 'string' ? target.restEpochId : null,
@@ -243,9 +335,38 @@ function confirmedSessionsFor(S, exId, fallback) {
     // Do not turn workouts logged under Linear/Double into confirmation history when a user
     // switches strategy. New entries snapshot the effective policy, including routine-level
     // inheritance, so only this strategy's own sessions participate.
-    if (entry?.target?.prog === 'confirmed_rep_range' && entry.sets?.some(s => s.done)) out.push(confirmedRepRangeSession(entry, fallback))
+    // Completed workouts retain Confirmed entries even when every prescribed row was skipped:
+    // that is an incomplete exposure and must break a top-range confirmation streak. Active
+    // workouts never reach this reader because only S.workouts is traversed here.
+    if (entry?.target?.prog === 'confirmed_rep_range') out.push(confirmedRepRangeSession(entry, fallback))
   })
   return out
+}
+
+// Find the most recent load that is safe to carry into Confirmed Rep-Range. A Confirmed
+// workout can promote its logged load only after every prescribed set is complete and uses
+// the same load; otherwise an isolated edited set (or a mixed-load workout) would silently
+// become the next prescription. Other reps policies keep their established max-load reading
+// when they provide the baseline for a first switch to Confirmed.
+function confirmedOperationalHistoryWeight(S, cfg) {
+  let weight = null
+  const progressionId = cfg?.progressionId
+  ;(S.workouts || []).forEach(workout => {
+    const entry = findWorkoutProgressionEntry(S, workout, cfg.id, progressionId)
+    if (!entry?.sets?.some(set => set?.done)) return
+
+    if (entry.target?.prog === 'confirmed_rep_range') {
+      const session = confirmedRepRangeSession(entry, cfg)
+      if (session.complete && session.loadUniform && session.workingWeight != null) {
+        weight = session.workingWeight
+      }
+      return
+    }
+
+    const session = readSession(entry, cfg)
+    if (session.mode === 'reps') weight = snapshotLoad(session.weight)
+  })
+  return weight
 }
 
 // Recovery has its own history boundary. A manual reset opens a new epoch without changing
@@ -273,7 +394,7 @@ function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
   }
 
   const rest = last.restSeconds ?? control?.resetSeconds ?? initialRest
-  if (!last.ok && last.firstOk) {
+  if (last.outcome === 'failed' && last.firstHit && last.laterMiss) {
     // Lowering the configured maximum must never turn a failed workout into an implicit
     // recovery decrease. Keep an already-higher effective value until the user explicitly
     // resets it (or the opt-in success rule earns a reduction).
@@ -296,9 +417,15 @@ function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
     ...(restEpochId ? { restEpochId } : {}),
     restSource: 'carried',
     restResetPending: false,
-    restWhy: last.firstOk
-      ? ['Recovery stays at {0}s.', rest]
-      : ['The first set missed the target — recovery stays at {0}s.', rest]
+    restWhy: last.outcome === 'incomplete'
+      ? ['Recovery stays at {0}s — the prescription was incomplete, not failed.', rest]
+      : last.outcome === 'legacy_unknown'
+        ? ['Recovery stays at {0}s — the historical target is unavailable.', rest]
+      : last.outcome === 'mixed_load'
+        ? ['Recovery stays at {0}s — prescribed sets used different loads.', rest]
+        : last.firstHit
+          ? ['Recovery stays at {0}s.', rest]
+          : ['The first set missed the target — recovery stays at {0}s.', rest]
   }
 }
 
@@ -361,89 +488,169 @@ function confirmedRepRangeRestPlan(recovery, sessions, normalized, last) {
 export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const normalized = confirmedRepRangeConfig(cfg, S.restSec)
   const { minReps, maxReps } = normalized
+  const rangeStep = repStep({ ...cfg, ...normalized })
+  const currentRangeKey = `${minReps}:${maxReps}:${rangeStep}`
+  const currentSetBaselineId = snapshotId(cfg.setBaselineId)
+  const currentProgressionKey = `${currentRangeKey}|sets:${currentSetBaselineId || 'legacy'}`
   const inc = loadIncrementFor(cfg, unit)
   const initialRest = normalized.restSeconds
   const maxRest = normalized.maxRestSeconds
   const sessions = confirmedSessionsFor(S, cfg.id, cfg)
-  const last = sessions[sessions.length - 1]
+  const latest = sessions[sessions.length - 1]
   const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg), initialRest, maxRest)
+  const rangePlan = {
+    policy: 'confirmed_rep_range', inc, minReps, maxReps, rangeStep,
+    ...(currentSetBaselineId ? { setBaselineId: currentSetBaselineId } : {})
+  }
+
+  // A range edit opens a new deterministic progression block. Sessions keep their own frozen
+  // range and are never clamped into the new one. A legacy snapshot with a known target remains
+  // usable only for the old one-step behavior; it cannot earn accelerated/top-range credit.
+  let progressionSessions = []
+  if (latest?.rangeKnown && latest.progressionKey === currentProgressionKey) {
+    let start = sessions.length - 1
+    while (start > 0 && sessions[start - 1].progressionKey === currentProgressionKey) start--
+    progressionSessions = sessions.slice(start)
+  } else if (latest && !latest.rangeKnown && latest.goal >= minReps && latest.goal <= maxReps) {
+    progressionSessions = [latest]
+  }
+  const last = progressionSessions[progressionSessions.length - 1]
+
+  const historyWeight = confirmedOperationalHistoryWeight(S, cfg)
+  const trackedWeight = cfg.progressionId
+    ? snapshotLoad(S.progressionWeights?.[cfg.progressionId]?.w)
+    : null
+  const operationalWeight = historyWeight ?? trackedWeight
+
   if (!last) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, null)
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, latest)
     // "First Confirmed" means no history for this policy, not necessarily no history for the
     // exercise. Preserve the most recent operational load from another reps policy so plan,
     // snapshot and generated sets all describe the same prescription. Time-mode history does
     // not carry a reps working load and must not leak into this baseline.
-    const previousReps = sessionsFor(S, cfg.id, cfg).filter(session => session.mode === 'reps')
-    const previous = previousReps[previousReps.length - 1]
     return {
-      policy: 'confirmed_rep_range', kind: 'first', inc,
-      ...(previous ? { weight: previous.weight } : {}),
+      ...rangePlan, kind: 'first',
+      ...(operationalWeight != null ? { weight: operationalWeight } : {}),
       reps: minReps, ...restPlan, topRangeStreak: 0,
-      why: ['Nothing logged yet — this session sets the baseline.']
+      why: latest?.rangeKnown
+        ? ['The prescription changed — the new block starts at {0} reps without rewriting prior workouts.', minReps]
+        : ['Nothing logged yet — this session sets the baseline.']
     }
   }
 
   const target = Math.min(maxReps, Math.max(minReps, last.goal || minReps))
+  const effectiveWeight = last.workingWeight
+    ?? last.prescribedWeight
+    ?? operationalWeight
+    ?? snapshotLoad(cfg.weight)
+    ?? 0
   // Set-count progression on unloaded work is historical state just like the rep target.
   // Once a completed Confirmed cycle adds a set, every following prescription must carry it
   // until another completed cycle adds the next one; falling back to cfg.sets here would make
   // the added set disappear after a single workout.
   const configuredSets = Math.max(1, cfg.sets || 1)
-  const bodyweightSets = last.weight <= 0
+  const bodyweightSets = effectiveWeight <= 0
     ? Math.max(configuredSets, last.planned || 1)
     : null
   const carriedSets = bodyweightSets != null && bodyweightSets > configuredSets
     ? { sets: bodyweightSets }
     : {}
   let streak = 0
-  for (let i = sessions.length - 1; i >= 0; i--) {
-    if (sessions[i].goal !== maxReps || !sessions[i].ok) break
-    streak++
+  if (last.topRangeSuccess) {
+    for (let i = progressionSessions.length - 1; i >= 0; i--) {
+      const session = progressionSessions[i]
+      if (!session.topRangeSuccess
+        || session.progressionKey !== last.progressionKey
+        || !sameLoad(session.workingWeight, last.workingWeight)) break
+      streak++
+    }
   }
   if (!last.ok) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+    const why = last.outcome === 'incomplete'
+      ? ['The prescription was incomplete — weight and target stay unchanged.']
+      : last.outcome === 'legacy_unknown'
+        ? ['The historical target is unavailable — the current prescription starts from its minimum.']
+      : last.outcome === 'mixed_load'
+        ? ['Prescribed sets used different loads — progression holds the frozen working load and target.']
+        : last.firstHit
+          ? ['A later set missed the target — weight and target stay unchanged.']
+          : ['The first set missed the target — weight and target stay unchanged.']
     return {
-      policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, reps: target,
-      inc, ...carriedSets, ...restPlan, topRangeStreak: 0,
-      why: last.firstOk
-        ? ['A later set missed the target — weight and target stay unchanged.']
-        : ['The first set missed the target — weight and target stay unchanged.']
+      ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: target,
+      ...carriedSets, ...restPlan, topRangeStreak: 0, why
     }
   }
-  if (target < maxReps) {
+
+  if (last.outcome === 'below_range_success') {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-    const step = repStep(cfg)
-    // Advance to the next valid point on the range. This is normally +1; total-per-side
-    // exercises use +2 so the prescription always splits evenly between the two sides.
-    const nextTarget = Math.min(maxReps, minReps + (Math.floor((target - minReps) / step) + 1) * step)
-    return { policy: 'confirmed_rep_range', kind: 'up', weight: last.weight, inc, reps: nextTarget, ...carriedSets, ...restPlan, topRangeStreak: 0, why: ['Every prescribed set reached {0} reps — target increased to {1}.', target, nextTarget] }
+    return {
+      ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: minReps,
+      ...carriedSets, ...restPlan, topRangeStreak: 0,
+      why: ['The historical result is below the frozen range — start from the minimum of {0} reps.', minReps]
+    }
   }
+
+  // Incomplete historical snapshots keep the conservative sequential rule. They can explain
+  // their own target and result, but they cannot be upgraded into a top-range confirmation by
+  // borrowing today's range.
+  if (!last.rangeKnown) {
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+    if (target >= maxReps) return {
+      ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps,
+      ...carriedSets, ...restPlan, topRangeStreak: 0,
+      why: ['The legacy workout has no frozen rep range — confirm the current maximum in a new workout.']
+    }
+    const nextTarget = Math.min(maxReps, minReps + (Math.floor((target - minReps) / rangeStep) + 1) * rangeStep)
+    return {
+      ...rangePlan, kind: 'up', weight: effectiveWeight, reps: nextTarget,
+      ...carriedSets, ...restPlan, topRangeStreak: 0,
+      why: ['Every prescribed set reached {0} reps — target increased conservatively to {1}.', target, nextTarget]
+    }
+  }
+
+  if (!last.topRangeSuccess) {
+    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+    const demonstrated = Math.max(target, last.validatedReps ?? target)
+    // Advance from the highest valid level every prescribed set demonstrated. A single workout
+    // may skip intermediate levels, but it still contributes at most one top confirmation.
+    const nextTarget = Math.min(
+      maxReps,
+      minReps + (Math.floor((demonstrated - minReps) / rangeStep) + 1) * rangeStep
+    )
+    return {
+      ...rangePlan, kind: 'up', weight: effectiveWeight, reps: nextTarget,
+      ...carriedSets, ...restPlan, topRangeStreak: 0,
+      why: ['Every prescribed set demonstrated {0} reps — target increased to {1}.', last.validatedReps, nextTarget]
+    }
+  }
+
   if (streak < 2) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-    return { policy: 'confirmed_rep_range', kind: 'hold', weight: last.weight, inc, reps: maxReps, ...carriedSets, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
+    return { ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps, ...carriedSets, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
   }
   const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
   // With no external load there is no plate to add. Complete the same two-confirmation cycle,
   // then progress volume by one set and restart at the bottom of the range. Once the useful
   // set cap is reached, hold the target and ask for load or a harder variation instead of
   // inventing a weighted exercise from a bodyweight log.
-  if (last.weight <= 0) {
+  if (effectiveWeight <= 0) {
     const sets = bodyweightSets + 1
     if (sets <= MAX_BW_SETS) {
       return {
-        policy: 'confirmed_rep_range', kind: 'up', weight: 0, inc, reps: minReps, sets,
+        ...rangePlan, kind: 'up', weight: 0, reps: minReps, sets,
         ...restPlan, topRangeStreak: 0,
         why: ['{0} reps in every set — add a set and go back to {1}.', maxReps, minReps]
       }
     }
     return {
-      policy: 'confirmed_rep_range', kind: 'hold', weight: 0, inc, reps: maxReps, ...carriedSets,
+      ...rangePlan, kind: 'hold', weight: 0, reps: maxReps, ...carriedSets,
       ...restPlan, topRangeStreak: 0,
       why: ['{0} sets of {1} — time to add weight or move to a harder variation.', sets - 1, maxReps]
     }
   }
-  const nextWeight = addLoad(last.weight, inc)
-  return { policy: 'confirmed_rep_range', kind: 'up', weight: nextWeight, inc, reps: minReps, ...restPlan, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', last.weight, nextWeight, unit, maxReps, minReps] }
+  const nextWeight = addLoad(effectiveWeight, inc)
+  return { ...rangePlan, kind: 'up', weight: nextWeight, reps: minReps, ...restPlan, topRangeStreak: 0, why: ['Weight increased: {0} → {1} {2}; target reps reset: {3} → {4}.', effectiveWeight, nextWeight, unit, maxReps, minReps] }
 }
 
 /**

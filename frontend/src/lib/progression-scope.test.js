@@ -324,6 +324,7 @@ describe('progression scope compatibility helpers', () => {
       { restSeconds: 150 },
       { maxRestSeconds: 300 },
       { restReductionStrategy: 'auto_after_successes' },
+      { setBaselineId: 'sets-boundary-1' },
       { prog: 'linear' },
       { mode: 'time', sec: 45 }
     ]

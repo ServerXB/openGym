@@ -213,6 +213,7 @@ export function progressionConfigSignature(config = {}, routine = {}, profile = 
       ...loadConfig,
       minReps,
       maxReps,
+      ...(nonEmpty(config.setBaselineId) ? { setBaselineId: nonEmpty(config.setBaselineId) } : {}),
       restSeconds,
       maxRestSeconds,
       restReductionStrategy: config.restReductionStrategy === 'auto_after_successes'

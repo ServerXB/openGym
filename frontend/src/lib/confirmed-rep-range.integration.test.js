@@ -152,6 +152,37 @@ describe('Confirmed Rep-Range workout integration', () => {
     expect(next.sets).toEqual([1, 2, 3].map(() => ({ w: 72.5, r: 8, done: false })))
   })
 
+  it('re-evaluates two frozen 4x8–10 results at 10 as two confirmations without rewriting them', () => {
+    const accelerated = { ...cfg, sets: 4, minReps: 8, maxReps: 10, inc: 2 }
+    const historicalEntry = target => ({
+      id: ID,
+      target: {
+        ...accelerated,
+        prog: 'confirmed_rep_range', reps: target, targetReps: target,
+        rangeStep: 1
+      },
+      sets: Array.from({ length: 4 }, () => ({ w: 70, r: 10, done: true }))
+    })
+    const S = state([
+      { d: '2026-08-01', entries: [historicalEntry(8)] },
+      { d: '2026-08-02', entries: [historicalEntry(9)] }
+    ])
+    S.routines[0].ex[0] = accelerated
+    const before = JSON.stringify(S.workouts)
+
+    const next = buildEntry(S, accelerated)
+    expect(next.plan).toMatchObject({
+      policy: 'confirmed_rep_range', kind: 'up', weight: 72, reps: 8,
+      minReps: 8, maxReps: 10, rangeStep: 1, topRangeStreak: 0
+    })
+    expect(next.target).toMatchObject({
+      weight: 72, targetReps: 8, sets: 4,
+      minReps: 8, maxReps: 10, rangeStep: 1
+    })
+    expect(next.sets).toEqual(Array.from({ length: 4 }, () => ({ w: 72, r: 8, done: false })))
+    expect(JSON.stringify(S.workouts)).toBe(before)
+  })
+
   it('keeps an added bodyweight set in every following workout snapshot', () => {
     const bodyweight = { ...cfg, weight: 0, bodyweight: true, inc: 2 }
     let S = state([1, 2].map((n) => ({

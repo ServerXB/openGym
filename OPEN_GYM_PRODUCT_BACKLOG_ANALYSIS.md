@@ -2,11 +2,11 @@
 
 - Data: 2026-08-26
 - Branch analizzato: `feature/confirmed-rep-range-progression`
-- Revisione analizzata: `274ccdf`
-- Stato: analisi completata, nessuna modifica applicativa inclusa in questo documento
+- Revisione di partenza analizzata: `274ccdf`
+- Stato: Release A implementata e validata; release successive pianificate
 - Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: approvata la validazione del livello effettivamente completato (`RF-11.1`)
-- Priorità di sviluppo: proposta del 2026-08-26, in attesa di validazione dell'utente
+- Ultimo aggiornamento funzionale: implementata la validazione del livello effettivamente completato (`RF-11.1`)
+- Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
 
 ## 1. Obiettivo
 
@@ -36,7 +36,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 8 | Peso da Withings | Fattibile in lettura; OAuth/polling server-side | P3 | Grande |
 | 9 | Dati Polar Flow | Fattibile solo come arricchimento in lettura | P3 | Grande |
 | 10 | Alias esercizi | Nuova funzione locale e sincronizzabile | P1 | Media |
-| 11 | Adattamento dopo modifiche manuali | Approvato l'accredito del livello minimo completato da tutte le serie | P0 | Grande |
+| 11 | Adattamento dopo modifiche manuali | Implementato e validato: livello dimostrato, outcome, serie opzionali e carico uniforme | P0 | Grande |
 | 12 | Orario/data inizio e fine | Dati già salvati, ma l'ora non è mostrata | P1 | Piccola/Media |
 
 Le due correzioni da affrontare per prime sono 6 e 11. Entrambe decidono quale storico appartiene
@@ -813,7 +813,21 @@ ricerca, non cambiano l'identità canonica.
 
 ### 5.11 Modifica manuale delle serie durante la sessione
 
-#### Stato attuale
+#### Stato dell'implementazione
+
+Implementato nella Release A con commit dedicato e gate completo documentato in
+`OPEN_GYM_RELEASE_TEST_REPORT.md`. Il motore deriva ora `outcome` e `validatedReps` esclusivamente
+dallo snapshot storico e dalle serie prescritte; due risultati anticipati al massimo valgono
+come due conferme anche quando i target congelati erano 8 e 9. Serie mancanti, extra e carichi
+misti hanno semantiche separate.
+
+La UI etichetta le righe oltre `target.sets` come `Opzionale`, separa i relativi contatori e non
+le usa per decidere se la prescrizione è completa. Aggiungere o rimuovere una riga resta locale
+alla sessione; il comando esplicito `Usa N serie dal prossimo allenamento` aggiorna soltanto lo
+slot di routine stabile e lascia immutato il target attivo. Se il numero di serie cambia, la
+normalizzazione degli scope separa correttamente la progressione futura quando necessario.
+
+#### Stato precedente alla Release A
 
 La UI permette di cambiare peso e ripetizioni, aggiungere una serie e rimuovere l'ultima. Lo
 snapshot `entry.target` conserva invece ciò che era stato prescritto. Confirmed valuta soltanto
@@ -931,9 +945,9 @@ essere usati range, numero di serie, carico e target congelati negli snapshot; u
 privo dei dati necessari non deve essere completato inventando valori dalla configurazione
 corrente.
 
-Il test corrente `does not let extra completed reps skip an intermediate target` deve essere
-sostituito: il salto è consentito fino al livello minimo raggiunto da tutte le serie prescritte,
-mai in base al risultato di una sola serie.
+Il precedente test `does not let extra completed reps skip an intermediate target` è stato
+sostituito: il salto è ora consentito fino al livello minimo raggiunto da tutte le serie
+prescritte, mai in base al risultato di una sola serie.
 
 #### Serie aggiunte/rimosse
 
@@ -950,17 +964,17 @@ optional         = serie oltre il numero prescritto
 - Una serie extra non modifica la routine e non influenza progressione/recupero.
 - Una serie prescritta rimossa rende la sessione incompleta, ma non deve simulare un cedimento
   successivo e aumentare automaticamente il recupero.
-- Se si vuole cambiare permanentemente il numero di serie, serve un comando separato
-  `Applica dalla prossima sessione`.
+- Se si vuole cambiare permanentemente il numero di serie, si usa il comando separato
+  `Usa N serie dal prossimo allenamento`.
 - Nessuna inferenza automatica deve riscrivere la configurazione della routine.
 - Le serie extra devono avere una label `Opzionale`.
 
 #### Carichi modificati manualmente
 
-Confirmed oggi usa il massimo fra le serie prescritte. Una singola serie più pesante può quindi
-diventare il nuovo working load anche se le altre erano più leggere.
+Prima della Release A, Confirmed usava il massimo fra le serie prescritte. Una singola serie più
+pesante poteva quindi diventare il nuovo working load anche se le altre erano più leggere.
 
-Regola raccomandata:
+Regola implementata:
 
 - se tutte le serie prescritte usano lo stesso carico modificato, quel carico può diventare la
   nuova baseline;
