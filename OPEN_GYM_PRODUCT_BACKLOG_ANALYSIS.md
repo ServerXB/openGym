@@ -3,9 +3,9 @@
 - Data: 2026-08-26
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Stato: Release A implementata e validata; Release B requisito 1 implementato e validato
+- Stato: Release A implementata e validata; Release B requisiti 1 e 5 implementati e validati
 - Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: completata la distinzione fra corpo libero puro e zavorrato
+- Ultimo aggiornamento funzionale: auto-riduzione attiva di default sulle sole nuove selezioni Confirmed
 - Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
 
 ## 1. Obiettivo
@@ -30,7 +30,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 2 | Sincronizzare timer e orologio | Timer locale già basato su deadline; controllo smartwatch richiede fondazione e companion | P2 | Grande/Epic |
 | 3 | Esporre e documentare API | Esistono endpoint interni, non una API pubblica sicura/versionata | P2 | Grande |
 | 4 | Scorrere tra routine | Navigazione attuale richiede ritorno alla lista | P1 | Media |
-| 5 | Auto-riduzione recupero attiva di default | Fattibile, ma solo sulle nuove selezioni | P1 | Piccola |
+| 5 | Auto-riduzione recupero attiva di default | Implementato e validato solo sugli eventi di nuova selezione; decoder legacy invariato | P1 | Piccola |
 | 6 | Istanze dello stesso esercizio | Implementato e validato: slot stabili, gruppi compatibili, snapshot e reader legacy | P0 | Grande |
 | 7 | Calcolo attrezzatura/piastre | Nuova epic; il catalogo non contiene abbastanza informazioni | P2 | Grande |
 | 8 | Peso da Withings | Fattibile in lettura; OAuth/polling server-side | P3 | Grande |
@@ -354,16 +354,18 @@ Piano solo quando non rimangono routine.
 
 ### 5.5 Riduzione automatica del recupero selezionata di default
 
-#### Stato attuale
+#### Stato dell'implementazione
 
-Il decoder Confirmed imposta esplicitamente `manual` quando il campo è assente o sconosciuto:
-`frontend/src/lib/confirmedRepRangeConfig.js:7-25`. Questo protegge i vecchi JSON da una nuova
+Implementato nella Release B con gate dedicati documentati in
+`OPEN_GYM_RELEASE_TEST_REPORT.md`.
+
+Il decoder `confirmedRepRangeConfig` non è stato cambiato: campo assente, `null` o sconosciuto
+continuano a produrre `manual`. Una factory separata materializza
+`auto_after_successes` esclusivamente durante una transizione effettiva verso Confirmed.
+Di conseguenza leggere, importare, sincronizzare o avviare un vecchio JSON non abilita alcuna
 automazione implicita.
 
-#### Decisione raccomandata
-
-Non cambiare il default del decoder. La nuova scelta deve essere materializzata soltanto quando
-l'utente seleziona ora Confirmed Rep-Range:
+La nuova scelta persistita resta esplicita:
 
 ```json
 {
@@ -371,23 +373,36 @@ l'utente seleziona ora Confirmed Rep-Range:
 }
 ```
 
-Regole:
+Comportamento implementato:
 
-- nuova selezione sull'esercizio: attivo;
-- nuova selezione sulla routine: attivo sugli esercizi ereditanti senza scelta precedente;
-- nuovo esercizio aggiunto a una routine Confirmed: attivo;
-- JSON legacy privo del campo: resta manuale;
-- valore esplicito `manual`: non viene sovrascritto passando temporaneamente ad altra strategia;
-- la bozza mostra il toggle attivo prima di Salva;
-- lo snapshot del workout conserva il valore effettivo.
+- una nuova selezione Confirmed sull'esercizio attiva il toggle nella bozza prima di Salva;
+- scegliere `Segui la routine` quando la routine è Confirmed è una nuova selezione effettiva;
+- passare da Time a Reps dentro una routine Confirmed applica lo stesso default;
+- una nuova selezione Confirmed sulla routine aggiorna soltanto gli esercizi Reps ereditanti;
+- Time, cardio e override locali non vengono modificati dalla selezione della routine;
+- un nuovo esercizio Reps aggiunto a una routine già Confirmed nasce automatico;
+- un Confirmed legacy privo del campo resta manuale anche nel prossimo workout;
+- `manual`, automatico e valori sconosciuti già presenti non vengono sovrascritti;
+- una preferenza esplicita resta dormiente attraversando altre policy o modalità e riappare al
+  ritorno in Confirmed;
+- export/import, sync e target snapshot conservano il valore effettivo;
+- nessun workout attivo o completato viene riscritto.
 
-#### Test necessari
+La strategia continua a fare parte della firma di progressione: passare davvero da manuale ad
+automatico può separare la progressione futura, senza reinterpretare successi o recuperi storici.
+La regola esistente resta invariata: riduzione di 30 secondi dopo quattro successi consecutivi
+allo stesso recupero, mai sotto il valore iniziale.
 
-- decoder legacy mancante/sconosciuto → manuale;
-- nuova selezione diretta/ereditata → automatico;
-- manuale esplicito sopravvive ai cambi di strategia;
-- import/export auto e manuale;
-- quattro successi, decremento di 30 secondi e limite base invariati.
+#### Test validati
+
+- decoder legacy mancante, `null` e sconosciuto → manuale;
+- nuova selezione diretta, ereditata, routine e Time→Reps → automatico;
+- matrice routine con Reps, Time, cardio e override;
+- persistenza della preferenza manuale/automatica sotto una policy inattiva;
+- import/export di automatico, manuale e legacy privo del campo;
+- snapshot del workout e immutabilità dello storico;
+- quattro successi, decremento di 30 secondi e limite base;
+- regressione completa, build e sincronizzazione delle undici lingue.
 
 ### 5.6 Istanze dello stesso esercizio tra routine
 
@@ -1143,7 +1158,7 @@ Definizioni:
 | 1 | 6 | P0 | Identità delle istanze tra routine | Evita contaminazioni di peso, target, streak e recupero fra configurazioni differenti | — |
 | 2 | 11 | P0 | Validare il livello realmente completato (`RF-11.1`) | Corregge direttamente le prescrizioni, compreso lo storico 8/9 eseguito a 10 | 6 |
 | 3 | 1 | P1 | Corpo libero puro senza campi peso | Rimuove un'ambiguità frequente e impedisce carichi invisibili recuperati dallo storico | 6, distinzione puro/zavorrato |
-| 4 | 5 | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed | Quick win ad alto valore; i JSON legacy devono restare manuali | 6 |
+| 4 | 5 | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed — completato | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
 | 5 | 12 | P1 | Mostrare e qualificare data/ora di inizio e fine | Il dato esiste già; completa storico e prepara il linking temporale esterno | — |
 | 6 | 2A | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
 | 7 | 4 | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
@@ -1173,7 +1188,7 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 #### Release B — Esperienza quotidiana
 
 1. Corpo libero puro/zavorrato — completato e validato.
-2. Default auto-riduzione sulle sole nuove selezioni Confirmed.
+2. Default auto-riduzione sulle sole nuove selezioni Confirmed — completato e validato.
 3. Orari start/end.
 4. Timer locale persistente.
 5. Rail routine.
@@ -1237,8 +1252,8 @@ eventuali problemi del calcolo da quelli introdotti dalle successive modifiche U
 
 ### Fase 2 — quick win e UX locale
 
-1. Separare corpo libero puro e zavorrato.
-2. Attivare auto-riduzione soltanto sulle nuove selezioni Confirmed.
+1. Separare corpo libero puro e zavorrato — completato e validato.
+2. Attivare auto-riduzione soltanto sulle nuove selezioni Confirmed — completato e validato.
 3. Mostrare orari start/end con provenance.
 4. Aggiungere rail routine accessibile.
 5. Centralizzare la ricerca e aggiungere alias.

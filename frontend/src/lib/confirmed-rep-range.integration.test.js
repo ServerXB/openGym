@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { buildSets } from './history.js'
-import { applyPrescription, nextPrescription } from './progression.js'
+import { applyPrescription, nextPrescription, policyFor } from './progression.js'
 import { restSecondsFor } from './workout-timer.js'
 import { targetForPrescription } from './workout-prescription.js'
 import { resetConfirmedRepRangeRest } from './confirmedRepRangeRest.js'
 import { buildPlanBundle, mergePlan, parsePlan } from './plan-share.js'
+import { applyConfirmedRepRangeSelection } from './confirmedRepRangeConfig.js'
 
 const ID = 'qa-confirmed-rep-range-lift'
 const cfg = {
@@ -37,6 +38,46 @@ function finish(S, expectedReps, actualReps = [expectedReps, expectedReps, expec
   entry.sets.forEach((set, i) => { set.r = actualReps[i]; set.done = true })
   return { ...S, workouts: [...S.workouts, { d: `2026-08-${String(S.workouts.length + 1).padStart(2, '0')}`, entries: [entry] }] }
 }
+
+describe('Confirmed selection defaults', () => {
+  it('snapshots automatic reduction for a new selection while legacy missing data stays manual', () => {
+    const selected = {
+      ...applyConfirmedRepRangeSelection({ ...cfg, prog: undefined }, {
+        previousPolicy: 'linear',
+        nextPolicy: 'confirmed_rep_range',
+        profileRestSeconds: 90
+      }),
+      prog: 'confirmed_rep_range'
+    }
+
+    const newEntry = buildEntry(state([]), selected)
+    expect(newEntry.plan.restReductionStrategy).toBe('auto_after_successes')
+    expect(newEntry.target.restReductionStrategy).toBe('auto_after_successes')
+
+    const legacyEntry = buildEntry(state([]), cfg)
+    expect(legacyEntry.plan.restReductionStrategy).toBe('manual')
+    expect(legacyEntry.target.restReductionStrategy).toBe('manual')
+  })
+
+  it('recognizes inherited Confirmed when mode or the local override changes', () => {
+    const routine = { prog: 'confirmed_rep_range' }
+    const timed = { id: 'mode-switch-lift', mode: 'time', sec: 45 }
+    const reps = { ...timed, mode: 'reps' }
+    const fromModeChange = applyConfirmedRepRangeSelection(reps, {
+      previousPolicy: policyFor(timed, routine, 'time'),
+      nextPolicy: policyFor(reps, routine, 'reps')
+    })
+    expect(fromModeChange.restReductionStrategy).toBe('auto_after_successes')
+
+    const overridden = { id: 'override-lift', mode: 'reps', prog: 'double' }
+    const inherited = { ...overridden, prog: undefined }
+    const fromOverrideChange = applyConfirmedRepRangeSelection(inherited, {
+      previousPolicy: policyFor(overridden, routine, 'reps'),
+      nextPolicy: policyFor(inherited, routine, 'reps')
+    })
+    expect(fromOverrideChange.restReductionStrategy).toBe('auto_after_successes')
+  })
+})
 
 function logEntry(S, entry, actualReps) {
   entry.sets.forEach((set, i) => { set.r = actualReps[i]; set.done = actualReps[i] != null })

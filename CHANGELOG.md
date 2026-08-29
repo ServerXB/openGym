@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Automatic recovery reduction for new Confirmed plans.** Newly selected Confirmed Rep-Range
+  configurations start with the existing four-success recovery reduction enabled; legacy plans
+  remain manual, and an explicit manual choice survives temporary policy or mode changes.
 - **Pure bodyweight and added weight are now explicit.** Reps, timed holds and Confirmed
   Rep-Range hide load controls when no external load is configured; `Add weight` reveals a
   dedicated field, while future pure-bodyweight sets are protected from stale historical loads.

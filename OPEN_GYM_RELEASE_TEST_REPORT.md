@@ -660,14 +660,174 @@ in produzione su CasaOS.
 
 ---
 
-## 7. Stato delle release successive
+## 7. Release B — Requisito 5: auto-riduzione predefinita sulle nuove selezioni Confirmed
+
+### 7.1 Esito
+
+**SUPERATO — implementazione validata e inclusa nel commit dedicato.**
+
+Gate conclusivo del 2026-08-29:
+
+```text
+Test Files  26 passed (26)
+Tests       509 passed (509)
+Failed      0
+```
+
+Non sono stati introdotti campi, migrazioni o reset automatici ulteriori. Il campo già esistente
+`restReductionStrategy` viene materializzato soltanto in risposta a una nuova selezione; il
+decoder dei dati storici continua a scegliere `manual` quando il campo non è affidabile.
+
+### 7.2 Comportamento funzionale verificato
+
+1. il decoder legacy interpreta campo assente, `null` o sconosciuto come `manual`;
+2. una nuova selezione Confirmed sull'esercizio materializza `auto_after_successes` nella bozza;
+3. la bozza mostra quindi `Riduzione automatica del recupero` già attiva prima di Salva;
+4. scegliere `Segui la routine` da un override diverso applica il default se la routine è
+   Confirmed;
+5. passare da Time a Reps applica il default quando rende effettiva la policy Confirmed ereditata;
+6. un nuovo esercizio Reps aggiunto a una routine già Confirmed nasce con il default automatico;
+7. selezionare Confirmed sulla routine aggiorna soltanto gli esercizi Reps ereditanti;
+8. esercizi Time, cardio e con override locale restano invariati;
+9. un valore esplicito `manual` non viene mai sostituito dal nuovo default;
+10. anche una scelta automatica esplicita sopravvive ai cambi temporanei;
+11. una preferenza esplicita viene salvata come dato dormiente sotto un'altra policy o modalità e
+    torna effettiva quando si rientra in Confirmed;
+12. un Confirmed legacy già presente e privo del campo resta manuale senza richiedere migrazioni;
+13. import/export conserva automatico e manuale, mentre non inventa il campo nei piani legacy;
+14. il target immutabile del workout snapshotta la strategia effettivamente selezionata;
+15. workout attivi e completati non vengono modificati né reinterpretati;
+16. manuale e automatico continuano a essere impostazioni materiali per lo scope futuro;
+17. la riduzione esistente resta di 30 secondi dopo quattro successi allo stesso recupero e non
+    scende mai sotto il recupero iniziale.
+
+### 7.3 UX/UI
+
+Non è stato aggiunto un nuovo controllo: viene riutilizzato il toggle già presente nel gruppo
+`Recupero` di Confirmed Rep-Range.
+
+- nuova attivazione: toggle acceso;
+- configurazione legacy senza campo: toggle spento;
+- scelta manuale precedente: toggle spento e rispettato;
+- l'utente può spegnerlo prima di salvare;
+- cambiare temporaneamente policy o modalità non perde la scelta esplicita.
+
+### 7.4 Test automatici mirati
+
+Comando:
+
+```powershell
+cd frontend
+npm.cmd test -- confirmedRepRangeConfig.test.js confirmed-rep-range.integration.test.js `
+  confirmedRepRangeAutoRest.test.js confirmedRepRangeAutoRest.integration.test.js `
+  plan-share.test.js workout-prescription.test.js progression-scope.test.js
+```
+
+Risultato:
+
+```text
+Test Files  7 passed (7)
+Tests       97 passed (97)
+Failed      0
+```
+
+La matrice copre decoder, evento di selezione, routine mista, ereditarietà, cambio modalità,
+preferenza dormiente, import/export, snapshot, scope e motore di riduzione.
+
+### 7.5 Regressione, build, lingue e diff
+
+Comandi:
+
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run build
+node scripts/check-locales.mjs
+cd ..
+git diff --check
+```
+
+Risultati:
+
+- regressione completa: **26 file, 509 test superati, 0 falliti**;
+- build Vite: **SUPERATA**, 118 moduli trasformati;
+- lingue: **11 su 11 sincronizzate**, 722 chiavi ciascuna;
+- diff check: **SUPERATO**; presenti soltanto avvisi informativi LF/CRLF;
+- warning Vite sui chunk grandi: già noto e non bloccante.
+
+### 7.6 Procedura manuale di replica
+
+#### Scenario A — nuova selezione sull'esercizio
+
+1. Aprire un esercizio Reps configurato con una policy diversa da Confirmed.
+2. Selezionare `Confirmed Rep-Range` nel campo `Regola`.
+3. Senza salvare, scorrere al gruppo Recupero.
+4. Verificare che `Riduzione automatica del recupero` sia già attiva.
+5. Salvare, aggiornare la pagina e riaprire: il toggle deve restare attivo.
+
+#### Scenario B — selezione sulla routine e nuovo esercizio
+
+1. Creare o aprire una routine non Confirmed contenente un esercizio Reps ereditante, un Time e
+   un Reps con override locale.
+2. Selezionare Confirmed come progressione della routine.
+3. Verificare che il Reps ereditante sia automatico; Time e override devono restare invariati.
+4. Aggiungere un nuovo esercizio Reps e aprirne la configurazione: il toggle deve essere già
+   attivo prima del primo salvataggio.
+
+#### Scenario C — JSON legacy
+
+1. Importare o usare un backup precedente con routine Confirmed ma senza
+   `restReductionStrategy`.
+2. Aprire l'esercizio senza cambiare policy: il toggle deve risultare spento.
+3. Avviare un workout e riesportare il backup: nessuna automazione deve essere stata abilitata
+   implicitamente e i workout precedenti devono essere invariati.
+
+#### Scenario D — scelta manuale persistente
+
+1. In un nuovo Confirmed spegnere il toggle e salvare.
+2. Passare a Linear o Time, salvare, poi tornare a Confirmed/Reps.
+3. Verificare che il toggle resti spento e che non venga riattivato dal nuovo default.
+4. Ripetere partendo da automatico: la scelta attiva deve sopravvivere allo stesso ciclo.
+
+#### Scenario E — cambio eredità e modalità
+
+1. In una routine Confirmed impostare un esercizio Reps con override Double.
+2. Selezionare `Segui la routine`: il toggle deve diventare attivo.
+3. Su un nuovo esercizio Time che segue la routine, passare a Reps: Confirmed diventa effettivo e
+   il toggle deve risultare attivo.
+
+#### Scenario F — riduzione effettiva e persistenza CasaOS
+
+1. Portare il recupero effettivo sopra il valore iniziale con un fallimento di una serie
+   successiva alla prima.
+2. Completare quattro workout riusciti prescritti allo stesso recupero.
+3. Verificare che il workout seguente proponga 30 secondi in meno, mai sotto il valore iniziale.
+4. Eseguire refresh, logout/login e `docker compose down` / `docker compose up -d` senza `-v`.
+5. Verificare che scelta, recupero e snapshot storici siano invariati.
+
+### 7.7 Gate manuali ancora necessari sull'ambiente reale
+
+Non eseguiti in questa postazione:
+
+- interazione completa del toggle in un browser reale;
+- refresh e sincronizzazione autenticata fra due browser;
+- Docker/CasaOS down/up con volume persistente;
+- WebView mobile su dispositivo fisico.
+
+I test automatici e la build sono verdi; questi gate restano necessari prima della pubblicazione
+in produzione su CasaOS.
+
+---
+
+## 8. Stato delle release successive
 
 | Release | Requisiti | Stato |
 |---|---|---|
 | A | 6 — identità e gruppi | Implementato, validato e committato |
 | A | 11 — risultati manuali e Confirmed | Implementato, validato e incluso nel commit dedicato |
 | B | 1 — corpo libero puro/zavorrato | Implementato, validato e incluso nel commit dedicato |
-| B | 5, 12, 2A, 4, 10 | Non iniziata |
+| B | 5 — auto-riduzione predefinita per nuove selezioni Confirmed | Implementato, validato e incluso nel commit dedicato |
+| B | 12, 2A, 4, 10 | Non iniziata |
 | C | 7 | Non iniziata |
 | D | 3, 2B, 2C | Non iniziata |
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |

@@ -4,7 +4,7 @@ import { useStore } from '../store/useStore.js'
 import { exOr } from '../lib/exercises.js'
 import { uid } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
-import { supersetUnits, cleanupSg, exLine, modeOf } from '../lib/history.js'
+import { supersetUnits, cleanupSg, exLine } from '../lib/history.js'
 import { Thumb } from '../components/Media.jsx'
 import { glyphPicker, exercisePicker, exConfigSheet, confirmSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
@@ -13,7 +13,7 @@ import { Button, SelectRow } from '../components/ui.jsx'
 import { POLICIES_FOR, POLICY_NAME, POLICY_DESC } from '../lib/progression.js'
 import BodyMap from '../components/BodyMap.jsx'
 import { loadOfRoutine, rankOf, MUSCLE_NAME } from '../lib/muscles.js'
-import { confirmedRepRangeConfig } from '../lib/confirmedRepRangeConfig.js'
+import { applyConfirmedRepRangeRoutineSelection } from '../lib/confirmedRepRangeConfig.js'
 import { createRoutineExerciseId } from '../lib/progression-scope.js'
 
 export default function RoutineEdit() {
@@ -53,16 +53,12 @@ export default function RoutineEdit() {
       <SelectRow icon="chartLine" title={t('Progression')} sheetTitle={t('Progression')}
         value={r.prog || 'linear'} onChange={v => update(s => {
           const routine = s.routines.find(x => x.id === id)
+          const previousPolicy = routine.prog || 'linear'
           routine.prog = v
-          if (v === 'confirmed_rep_range') routine.ex.forEach(ex => {
-            if (!ex.prog && modeOf(ex) === 'reps') {
-              Object.assign(ex, confirmedRepRangeConfig(ex, s.restSec))
-              // Legacy routine configuration could carry a user-selected first target. The
-              // strategy now derives it from minReps; remove it on this explicit routine edit
-              // without touching targetReps snapshots in completed or active workouts.
-              delete ex.targetReps
-              delete ex.topRangeStreak
-            }
+          routine.ex = applyConfirmedRepRangeRoutineSelection(routine.ex, {
+            previousPolicy,
+            nextPolicy: v,
+            profileRestSeconds: s.restSec
           })
         })}
         options={POLICIES_FOR.reps.map(p => ({ value: p, label: t(POLICY_NAME[p]), subtitle: t(POLICY_DESC[p]) }))} />

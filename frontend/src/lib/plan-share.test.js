@@ -147,6 +147,29 @@ describe('plan sharing with Confirmed Rep-Range', () => {
     expect(parsed.routines[0].ex[0]).toMatchObject({
       minReps: 8, maxReps: 12, targetReps: 10
     })
+    expect(parsed.routines[0].ex[0]).not.toHaveProperty('restReductionStrategy')
+
+    const reExported = buildPlanBundle({
+      routines: parsed.routines,
+      week: {},
+      customEx: parsed.customEx
+    })
+    expect(reExported.routines[0].ex[0]).not.toHaveProperty('restReductionStrategy')
+  })
+
+  it('round-trips an explicit manual recovery preference', () => {
+    const config = {
+      id: 'manual-confirmed-lift', sets: 3, reps: 8,
+      prog: 'confirmed_rep_range', restReductionStrategy: 'manual'
+    }
+    const bundle = buildPlanBundle({
+      routines: [{ id: 'manual-routine', name: 'Manual', ex: [config] }],
+      customEx: [{ id: config.id, n: 'Manual lift', bp: 'chest' }],
+      week: {}
+    })
+
+    expect(bundle.routines[0].ex[0].restReductionStrategy).toBe('manual')
+    expect(parsePlan(JSON.stringify(bundle)).routines[0].ex[0].restReductionStrategy).toBe('manual')
   })
 
   it('promotes a legacy weightIncrement to canonical inc on a new export', () => {

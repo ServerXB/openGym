@@ -22,7 +22,11 @@ import { applyActiveTopWeight, applyWorkoutWeights, recordsForWorkout } from './
 import { buildScopedWorkoutEntry, completedWorkoutEntries } from './lib/workout-scope.js'
 import { unitPrescribedComplete, workoutSetStatus } from './lib/workout-set-status.js'
 import { nextPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
-import { confirmedRepRangeConfig } from './lib/confirmedRepRangeConfig.js'
+import {
+  applyConfirmedRepRangeSelection,
+  confirmedRepRangeConfig,
+  confirmedRepRangeRecoveryPreference
+} from './lib/confirmedRepRangeConfig.js'
 import {
   CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
   CONFIRMED_REST_DECREMENT_SECONDS,
@@ -595,7 +599,17 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, add
   return <>
     <h4 className="sec">{t('Progression')}</h4>
     <div className="sect-b" style={{ marginBottom: 8 }}>
-      <SelectRow title={t('Rule')} sheetTitle={t('Progression')} value={c.prog || ''} onChange={v => setC(x => ({ ...x, prog: v || undefined }))}
+      <SelectRow title={t('Rule')} sheetTitle={t('Progression')} value={c.prog || ''} onChange={v => setC(x => {
+        const currentMode = modeOf({ ...x, id: ex.id })
+        const previousPolicy = policyFor({ ...x, id: ex.id }, routine, currentMode)
+        const next = { ...x, prog: v || undefined }
+        const nextPolicy = policyFor({ ...next, id: ex.id }, routine, currentMode)
+        return applyConfirmedRepRangeSelection(next, {
+          previousPolicy,
+          nextPolicy,
+          profileRestSeconds: st.restSec
+        })
+      })}
         options={[{ value: '', label: t('Follow the routine ({0})', t(POLICY_NAME[inherited])) },
           ...options.map(p => ({ value: p, label: t(POLICY_NAME[p]) }))]} />
     </div>
@@ -727,11 +741,27 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, add
 function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   const st = useStore(s => s.S)
   const cardio = isCardio(ex.id)
-  const [c, setC] = useState(existing || defaultConfig(ex.id))
+  const initialConfig = (() => {
+    const base = existing || defaultConfig(ex.id)
+    if (cardio) return base
+    const initialMode = modeOf({ ...base, id: ex.id })
+    const initialPolicy = policyFor({ ...base, id: ex.id }, routine, initialMode)
+    if (initialMode !== 'reps' || initialPolicy !== 'confirmed_rep_range') return base
+    // Existing JSON goes through the legacy decoder and therefore remains manual when the field
+    // is absent. A genuinely new exercise in a Confirmed routine receives the new product default.
+    return existing
+      ? { ...base, ...confirmedRepRangeConfig(base, st.restSec) }
+      : applyConfirmedRepRangeSelection(base, {
+          previousPolicy: null,
+          nextPolicy: initialPolicy,
+          profileRestSeconds: st.restSec
+        })
+  })()
+  const [c, setC] = useState(initialConfig)
   // The added-load editor is a local disclosure, not persisted state. Existing plans with a
   // positive bodyweight load open it automatically; saving 0 keeps the exercise bodyweight-only.
   const [addedLoadOpen, setAddedLoadOpen] = useState(() =>
-    hasAddedBodyweightLoad({ ...(existing || defaultConfig(ex.id)), id: ex.id })
+    hasAddedBodyweightLoad({ ...initialConfig, id: ex.id })
   )
   const [progressionValid, setProgressionValid] = useState(true)
   // Cardio keeps its own duration+speed form; the reps/time choice (issue #16) is offered for
@@ -750,7 +780,17 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     setAddedLoadOpen(false)
   }
   // Keep whatever the other mode already had (sets, weight) and fill only what is missing.
-  const setMode = m => setC(x => ({ ...defaultConfig(ex.id, m), ...x, mode: m }))
+  const setMode = m => setC(x => {
+    const currentMode = modeOf({ ...x, id: ex.id })
+    const previousPolicy = policyFor({ ...x, id: ex.id }, routine, currentMode)
+    const next = { ...defaultConfig(ex.id, m), ...x, mode: m }
+    const nextPolicy = policyFor({ ...next, id: ex.id }, routine, m)
+    return applyConfirmedRepRangeSelection(next, {
+      previousPolicy,
+      nextPolicy,
+      profileRestSeconds: st.restSec
+    })
+  })
   const save = () => {
     if (!progressionValid) return
     close()
@@ -772,6 +812,11 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       // historical target separately.
       const { targetReps: _legacyTarget, ...confirmedConfig } = normalizedConfirmed
       Object.assign(prog, confirmedConfig)
+    } else if (Object.prototype.hasOwnProperty.call(c, 'restReductionStrategy')) {
+      // Keep the user's explicit recovery preference dormant while another policy is active.
+      // It has no effect outside Confirmed, but prevents a temporary switch from being mistaken
+      // for a brand-new opt-in when the user later comes back.
+      Object.assign(prog, confirmedRepRangeRecoveryPreference(c))
     }
     // Written only when it differs from what the dataset already says, so a barbell config
     // stays exactly the shape it was before these flags existed.
