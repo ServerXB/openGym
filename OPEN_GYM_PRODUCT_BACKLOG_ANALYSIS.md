@@ -1,11 +1,11 @@
 # openGym — Analisi funzionale e architetturale del backlog prodotto
 
-- Data: 2026-08-26
+- Data: 2026-09-05
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Stato: Release A implementata e validata; Release B requisiti 1 e 5 implementati e validati
+- Stato: Release A implementata e validata; Release B requisiti 1, 5 e 12 implementati e validati
 - Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: auto-riduzione attiva di default sulle sole nuove selezioni Confirmed
+- Ultimo aggiornamento funzionale: cronologia start/end deterministica, localizzata e compatibile con import e storico legacy
 - Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
 
 ## 1. Obiettivo
@@ -37,7 +37,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 9 | Dati Polar Flow | Fattibile solo come arricchimento in lettura | P3 | Grande |
 | 10 | Alias esercizi | Nuova funzione locale e sincronizzabile | P1 | Media |
 | 11 | Adattamento dopo modifiche manuali | Implementato e validato: livello dimostrato, outcome, serie opzionali e carico uniforme | P0 | Grande |
-| 12 | Orario/data inizio e fine | Dati già salvati, ma l'ora non è mostrata | P1 | Piccola/Media |
+| 12 | Orario/data inizio e fine | Implementato e validato: lifecycle deterministico, UI localizzata, import e legacy | P1 | Piccola/Media |
 
 Le due correzioni da affrontare per prime sono 6 e 11. Entrambe decidono quale storico appartiene
 a una prescrizione; costruire sopra di esse attrezzatura, recovery reset o collegamento Polar
@@ -1027,22 +1027,13 @@ Regola implementata:
 
 ### 5.12 Data e ora di inizio/fine sessione
 
-#### Stato attuale
+#### Stato dell'implementazione
 
-Il requisito è già soddisfatto a livello dati:
+Implementato nella Release B con gate dedicati documentati in
+`OPEN_GYM_RELEASE_TEST_REPORT.md`.
 
-- `start: Date.now()` viene salvato in `beginWorkout`;
-- `end: Date.now()` viene salvato al finish;
-- localStorage, backup e sync serializzano entrambi.
-
-Riferimenti: `frontend/src/sheets.jsx:1059-1072` e `frontend/src/sheets.jsx:1169-1189`.
-
-La UI mostra però soltanto data e durata. Non esiste un formatter dedicato all'orario. Gli import
-senza ora usano fallback tecnici che non devono essere mostrati come orari reali.
-
-#### Decisione raccomandata
-
-Conservare `start` e `end` numerici per compatibilità e aggiungere provenance opzionale:
+La soluzione conserva gli epoch numerici `start` e `end` e aggiunge metadati opzionali di
+provenienza, precisione e fuso:
 
 ```json
 {
@@ -1056,34 +1047,87 @@ Conservare `start` e `end` numerici per compatibilità e aggiungere provenance o
 }
 ```
 
-Per un import senza ora: `timeSource: "import"`, `timePrecision: "date-only"`.
+Non è richiesta alcuna migrazione. I nuovi workout nativi usano `timeSource: "native"` e
+`timePrecision: "millisecond"`; gli import usano `timeSource: "import"` con precisione
+`date-only`, `minute`, `second` o `millisecond` in base al dato sorgente.
 
-All'avvio usare un solo istante:
+#### Lifecycle deterministico
+
+All'avvio `nativeWorkoutStart` legge una sola volta l'istante e deriva `d` da quello stesso epoch
+nel fuso catturato. Questo elimina la possibile incoerenza a mezzanotte prodotta dalle precedenti
+chiamate separate a `todayISO()` e `Date.now()`.
+
+Alla conclusione `nativeWorkoutEnd` legge una sola volta l'istante finale, registra il fuso di
+fine e preserva i metadati dello start. Un active workout legacy privo di metadati viene completato
+come nativo senza modificarne start, target o serie. Lo scarto continua a eliminare soltanto
+l'active locale e non crea un workout terminato.
+
+#### UX/UI adottata
+
+History, Recent workouts, le righe e i dettagli aperti dal Calendar, il dettaglio workout e
+Admin mostrano:
 
 ```text
-startedAt = Date.now()
-d = isoOf(new Date(startedAt))
+mer 26 ago 2026 · 18:05–19:12 · 1h 7m
 ```
 
-Il dettaglio storico mostra, per esempio:
+Il riepilogo appena concluso mostra data completa e intervallo start–end sotto il titolo; la
+durata resta nella tile dedicata. L'header del workout attivo non è stato appesantito: su 320 px
+contiene già nome, elapsed, serie e due azioni, mentre l'elapsed comunica che la sessione è in
+corso.
+
+Il riepilogo mensile del Calendar somma soltanto durate conosciute: se contiene esclusivamente
+import solo-data, omette la durata invece di mostrare un fuorviante `0 min`.
+
+Se la sessione attraversa mezzanotte o termina in un altro fuso, l'intervallo include anche la
+data finale. Se il cambio DST ripete la stessa ora, vengono mostrati gli offset, per esempio
+`02:30 GMT+2–02:30 GMT+1 · 1h 0m`. Il formatter usa la lingua selezionata e non restituisce mai
+`Invalid Date`.
+
+#### Import e backward compatibility
+
+- un import con orario conserva start, fine, data di fine e fuso locale di interpretazione;
+- un ISO con `Z`/offset conserva l'epoch assoluto e gli eventuali secondi/millisecondi, quindi
+  viene raggruppato e mostrato nel giorno corretto del fuso locale d'importazione;
+- ogni epoch locale viene costruito separatamente, quindi un cambio DST non altera la durata;
+- un wall clock locale inesistente nel salto DST primaverile viene scartato invece di essere
+  spostato automaticamente di un'ora;
+- un import solo-data conserva il fallback numerico tecnico per compatibilità, ma viene marcato
+  `date-only` e in UI mostra esclusivamente la data;
+- una riga con data/start impossibile viene scartata invece di normalizzarsi silenziosamente in
+  un altro giorno; un end non valido viene ignorato senza perdere la serie valida;
+- un workout legacy con `end > start` continua a mostrare il proprio intervallo reale;
+- un legacy con `start === end` resta solo-data, perché quella forma identifica anche il vecchio
+  fallback di import;
+- timestamp o date corrotti vengono omessi in sicurezza; un fuso non valido usa un fallback
+  sicuro. Il JSON storico non viene riscritto.
+
+#### Persistenza e sincronizzazione
+
+localStorage, backup JSON e mirror mobile conservano i nuovi campi senza schema migration. Un
+active workout e il suo start sopravvivono a refresh/restart sullo stesso dispositivo.
+
+Il server elimina intenzionalmente `state.active` durante `PUT /api/data`: un allenamento in
+corso non viene quindi trasferito fra dispositivi. Questa policy di concorrenza resta fuori dal
+requisito 12. Dopo il finish, il workout completo e tutti i metadati start/end entrano invece
+nella sincronizzazione server ordinaria e persistono nel volume Docker.
+
+Non esiste ancora una workout API pubblica: la serializzazione RFC 3339 resta parte del futuro
+requisito 3/API v1. Lo storage corrente continua correttamente a usare epoch più provenance.
+
+#### Test eseguiti
 
 ```text
-26 ago 2026 · 18:05–19:12 · 1 h 07 min
+29 file di test superati
+550 test superati
+0 test falliti
 ```
 
-Se la sessione attraversa mezzanotte o cambia fuso, mostrare anche la data di fine. Un workout
-importato senza ora mostra soltanto la data, mai un'ora inventata.
-
-#### Test necessari
-
-- start scritto una volta e preservato da refresh/restart;
-- end scritto una volta dopo la conferma finale;
-- attraversamento mezzanotte e DST;
-- `d` derivato dallo stesso istante di start;
-- import date-only/minute e JSON legacy;
-- nessun `Invalid Date`;
-- scarto workout non crea una falsa sessione terminata;
-- formato locale e API RFC 3339 coerenti.
+La matrice copre singola acquisizione start/end, wiring reale del lifecycle, finish idempotente,
+scarto, stessa data, mezzanotte, cambio fuso, DST primaverile/autunnale, localizzazione italiana,
+persistenza JSON/storage, import date-only/minute/second/millisecond, ISO con offset, wall clock
+DST inesistente, fine il giorno successivo, date invalide, legacy e dati corrotti. Build, lingue e
+diff sono inclusi nel report di rilascio; i gate browser/CasaOS reali restano manuali.
 
 ## 6. Modello dati trasversale consigliato
 
@@ -1159,7 +1203,7 @@ Definizioni:
 | 2 | 11 | P0 | Validare il livello realmente completato (`RF-11.1`) | Corregge direttamente le prescrizioni, compreso lo storico 8/9 eseguito a 10 | 6 |
 | 3 | 1 | P1 | Corpo libero puro senza campi peso | Rimuove un'ambiguità frequente e impedisce carichi invisibili recuperati dallo storico | 6, distinzione puro/zavorrato |
 | 4 | 5 | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed — completato | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
-| 5 | 12 | P1 | Mostrare e qualificare data/ora di inizio e fine | Il dato esiste già; completa storico e prepara il linking temporale esterno | — |
+| 5 | 12 | P1 | Mostrare e qualificare data/ora di inizio e fine — completato | Lifecycle deterministico, storico leggibile e base temporale per linking esterno | — |
 | 6 | 2A | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
 | 7 | 4 | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
 | 8 | 10 | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
@@ -1189,7 +1233,7 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 
 1. Corpo libero puro/zavorrato — completato e validato.
 2. Default auto-riduzione sulle sole nuove selezioni Confirmed — completato e validato.
-3. Orari start/end.
+3. Orari start/end — completato e validato.
 4. Timer locale persistente.
 5. Rail routine.
 6. Alias e ricerca unica.
@@ -1254,7 +1298,7 @@ eventuali problemi del calcolo da quelli introdotti dalle successive modifiche U
 
 1. Separare corpo libero puro e zavorrato — completato e validato.
 2. Attivare auto-riduzione soltanto sulle nuove selezioni Confirmed — completato e validato.
-3. Mostrare orari start/end con provenance.
+3. Mostrare orari start/end con provenance — completato e validato.
 4. Aggiungere rail routine accessibile.
 5. Centralizzare la ricerca e aggiungere alias.
 

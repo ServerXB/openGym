@@ -9,7 +9,7 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 
 ## 2. Ambiente di riferimento
 
-- Data ultimo aggiornamento: 2026-08-27
+- Data ultimo aggiornamento: 2026-09-05
 - Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
@@ -819,7 +819,256 @@ in produzione su CasaOS.
 
 ---
 
-## 8. Stato delle release successive
+## 8. Release B — Requisito 12: data e ora di inizio/fine workout
+
+### 8.1 Esito
+
+**SUPERATO — implementazione validata e inclusa nel commit dedicato di questo requisito.**
+
+Gate conclusivo del 2026-09-05:
+
+```text
+Test Files  29 passed (29)
+Tests       550 passed (550)
+Failed      0
+```
+
+Il requisito non riscrive alcun workout esistente. I campi numerici `start` e `end` restano
+compatibili con tutto lo storage precedente; i nuovi metadati opzionali spiegano se un orario è
+nativo, importato oppure sconosciuto.
+
+### 8.2 Comportamento funzionale verificato
+
+1. `nativeWorkoutStart` usa una sola lettura temporale per costruire start e data;
+2. la data `d` è derivata dallo stesso istante nel fuso catturato, senza race a mezzanotte;
+3. `nativeWorkoutEnd` usa una sola lettura temporale per end e registra il fuso di fine;
+4. start, end e metadati non mutano l'active passato alle funzioni di dominio;
+5. un active workout legacy può essere concluso senza migrazione e riceve metadati nativi
+   mancanti;
+6. lo scarto dell'active continua a non creare un workout storico;
+7. i nuovi dati sopravvivono al round-trip JSON e allo storage locale;
+8. data, intervallo e durata sono localizzati e mostrati soltanto quando affidabili;
+9. un intervallo oltre mezzanotte include esplicitamente la data finale;
+10. un cambio di fuso include la data finale anche se il numero del giorno coincide;
+11. la durata resta assoluta durante il passaggio DST;
+12. l'ora ripetuta del DST autunnale mostra offset diversi e non appare come durata zero;
+13. ISO con `Z`/offset mantengono epoch, secondi e giorno locale corretti;
+14. un import con start ma senza end mostra soltanto lo start, non un falso intervallo a zero;
+15. un import solo-data non mostra mai le 18:00 usate come fallback tecnico;
+16. una riga con start impossibile viene scartata senza rollover silenzioso; un end non valido
+    viene ignorato senza perdere la serie valida;
+17. un wall clock inesistente nel salto DST primaverile viene scartato, non normalizzato avanti;
+18. un end importato nel giorno successivo non viene più perso o ricondotto allo start;
+19. workout legacy con intervallo positivo restano leggibili senza nuovi campi;
+20. legacy con `start === end` restano solo-data, compatibili con il vecchio importer;
+21. timestamp, date, locale o fusi corrotti non producono mai `Invalid Date`;
+22. il wiring reale conserva lo start fino al finish, non duplica un doppio finish e lo scarto
+    non crea storico;
+23. il riepilogo mensile somma soltanto durate note e non trasforma import solo-data in `0 min`;
+24. target, serie, peso, volume, PR, progressione e recupero non sono coinvolti.
+
+### 8.3 Modello dati e backward compatibility
+
+Nuovo workout nativo:
+
+```json
+{
+  "d": "2026-08-29",
+  "start": 1788019500000,
+  "end": 1788023520000,
+  "startTimeZone": "Europe/Rome",
+  "endTimeZone": "Europe/Rome",
+  "timeSource": "native",
+  "timePrecision": "millisecond"
+}
+```
+
+Matrice di lettura:
+
+| Dato | Presentazione |
+|---|---|
+| Nativo nuovo | Data completa · start–end · durata |
+| Import con orario | Data completa · start–end se noto · durata se positiva |
+| Import solo-data | Solo data; nessun orario tecnico |
+| Legacy con `end > start` | Intervallo storico e durata, senza migrazione |
+| Legacy con `start === end` | Solo data |
+| Timestamp/data non validi | Parti non affidabili omesse; mai `Invalid Date` |
+| Fuso non valido | Fallback sicuro; mai `Invalid Date` |
+
+Il formatter centrale è usato da History, Recent workouts, righe/dettagli aperti dal Calendar,
+dettaglio workout e Admin.
+Il riepilogo di fine mostra data e intervallo sotto il titolo, mantenendo la durata nella tile
+esistente. L'header attivo non è stato ampliato perché a 320 px contiene già elapsed, serie e
+azioni principali.
+
+### 8.4 Import verificato
+
+L'importer ora:
+
+- valida anno, mese, giorno, ora, minuti e secondi dello start prima di accettare una riga; un
+  end non valido viene ignorato senza scartare la serie valida;
+- classifica la precisione come `date-only`, `minute`, `second` o `millisecond`;
+- rispetta l'epoch di ISO con `Z`/offset e lo converte nel giorno del fuso locale d'importazione;
+- interpreta separatamente start ed end nel fuso locale;
+- non calcola più l'orario sommando millisecondi alla mezzanotte, operazione errata nei giorni
+  con cambio DST;
+- scarta un wall clock locale che non esiste nel salto DST primaverile;
+- conserva la data completa dell'end, compreso il giorno successivo;
+- continua a mantenere il fallback numerico delle 18:00 per compatibilità con statistiche e JSON,
+  ma lo rende invisibile tramite provenance esplicita.
+
+Un wall clock privo di offset nell'ora ripetuta del cambio autunnale è intrinsecamente ambiguo:
+la piattaforma sceglie una delle due occorrenze. Quando il file fornisce `Z` o un offset, invece,
+l'istante è univoco e viene conservato esattamente. Gli import effort esistenti sono stati inclusi
+nel gate mirato per verificare che la modifica del parser non perda RPE/RIR, unità o set.
+
+### 8.5 Test automatici mirati
+
+Comando:
+
+```powershell
+cd frontend
+npm.cmd test -- workout-time.test.js import-time.test.js import-effort.test.js `
+  state-storage.test.js workout-lifecycle.integration.test.jsx --run
+```
+
+Risultato:
+
+```text
+Test Files  5 passed (5)
+Tests       57 passed (57)
+Failed      0
+```
+
+La matrice include acquisizione singola, lifecycle reale, finish idempotente, scarto, persistenza,
+locale italiano, date-only, start senza end, mezzanotte, cambio fuso, entrambi i passaggi DST,
+ISO offset/secondi, wall clock DST inesistente, dati corrotti, leap year, end nel giorno successivo
+e integrazione importer → formatter.
+
+### 8.6 Regressione, build, lingue e diff
+
+Comandi:
+
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run build
+node scripts/check-locales.mjs
+cd ..
+git diff --check
+```
+
+Risultati:
+
+- regressione completa: **29 file, 550 test superati, 0 falliti**;
+- build Vite: **SUPERATA**, 119 moduli trasformati;
+- lingue: **11 su 11 sincronizzate**, 722 chiavi ciascuna;
+- diff check: **SUPERATO**; presenti soltanto avvisi informativi LF/CRLF;
+- warning Vite sui chunk grandi: già noto e non bloccante.
+
+### 8.7 Procedura manuale di replica
+
+Gli scenari A–H seguenti sono procedure di accettazione da eseguire sull'ambiente reale; non
+sono stati eseguiti in questa postazione e non vengono presentati come test E2E già superati.
+
+#### Scenario A — workout nativo normale
+
+1. Annotare data, ora e fuso del dispositivo.
+2. Avviare un workout, completare almeno una serie e terminarlo.
+3. Nel riepilogo verificare `data completa · ora inizio–ora fine` e la durata nella tile.
+4. Aprire History, Recent workouts e dettaglio; dal Calendar toccare il giorno allenato e aprire
+   la relativa riga/dettaglio. La stessa cronologia deve comparire in tutti questi punti.
+5. Verificare che serie, peso, volume, PR e prescrizione successiva siano invariati.
+
+#### Scenario B — refresh e chiusura sullo stesso dispositivo
+
+1. Avviare un workout e attendere almeno un minuto.
+2. Aggiornare la pagina oppure chiudere e riaprire il browser senza cancellare i dati del sito.
+3. Verificare che il workout sia ancora attivo e che l'elapsed continui dallo start originale.
+4. Terminarlo e verificare che l'ora di inizio sia quella precedente al refresh, non quella di
+   riapertura.
+
+#### Scenario C — import solo-data
+
+1. Creare un CSV:
+
+   ```csv
+   Date,Exercise,Weight,Reps
+   2026-08-29,Bench Press,60,10
+   ```
+
+2. Importarlo da Settings e aprire il workout nello storico.
+3. Deve comparire la data completa, ma non `18:00`, un intervallo o `0 min`.
+4. Se il mese contiene soltanto workout solo-data, anche il riepilogo Calendar deve omettere
+   `0 min`.
+5. Esportare il backup e verificare `timeSource: "import"` e
+   `timePrecision: "date-only"`.
+
+#### Scenario D — import con end dopo mezzanotte
+
+1. Creare un CSV Hevy minimo:
+
+   ```csv
+   title,start_time,end_time,exercise_title,set_index,set_type,weight_kg,reps
+   Late,"29 Aug 2026, 23:30","30 Aug 2026, 00:45",Bench Press (Barbell),0,normal,60,10
+   ```
+
+2. Importarlo e aprire il workout.
+3. Verificare start `23:30`, data finale `30 ago 2026`, end `00:45` e durata `1h 15m`.
+4. Nel backup verificare `timeSource: "import"`, `timePrecision: "minute"` e i fusi.
+
+#### Scenario E — storico legacy
+
+1. Fare un backup dei dati reali prima dell'aggiornamento.
+2. Dopo il deploy aprire un vecchio workout con start/end reali: deve mostrare data, intervallo e
+   durata senza che il JSON venga migrato manualmente.
+3. Aprire un vecchio import che mostrava durata ignota: deve mostrare solo la data.
+4. Confrontare il backup prima/dopo: workout, serie, target e pesi storici devono essere identici.
+
+#### Scenario F — discard e finish anticipato
+
+1. Avviare un workout, registrare una serie e scegliere Scarta; il numero di workout in History
+   non deve aumentare.
+2. Avviarne un altro, registrare una serie e scegliere Termina in anticipo.
+3. Confermare: deve essere creato un solo workout, con un solo end e cronologia leggibile.
+4. Annullare invece il dialog in una terza prova: l'active deve restare aperto e senza end.
+
+#### Scenario G — cambio fuso durante il workout
+
+1. Su un dispositivo di prova avviare il workout in un fuso, annotando l'ora.
+2. Cambiare il fuso del dispositivo e terminare il workout.
+3. Lo storico deve mostrare start nel fuso iniziale, end nel nuovo fuso e la data accanto all'end;
+   la durata deve dipendere dagli epoch, non dalla differenza fra gli orologi a parete.
+
+#### Scenario H — persistenza CasaOS e sync
+
+1. Terminare un workout e verificare la cronologia nel browser collegato a CasaOS.
+2. Eseguire refresh, logout/login e aprire lo stesso profilo su un secondo browser: il workout
+   completato deve conservare epoch, provenance, precisione e fusi.
+3. Eseguire `docker compose down` e `docker compose up -d` senza `-v`.
+4. Verificare nuovamente lo storico e confrontare un backup JSON.
+5. Non aspettarsi che un workout ancora attivo compaia sul secondo dispositivo: il server
+   elimina intenzionalmente `state.active`; lo start in corso è persistente solo localmente.
+
+### 8.8 Gate manuali ancora necessari sull'ambiente reale
+
+Non eseguiti in questa postazione:
+
+- controllo visuale di righe cronologiche a 320/360/390/430/640 px e reflow 200%;
+- refresh/restart in browser reale durante un workout attivo;
+- cambio fuso reale durante una sessione e verifica DST su dispositivo;
+- import tramite file picker reale e confronto con backup dell'utente;
+- sincronizzazione autenticata fra due browser per un workout completato;
+- Docker/CasaOS down/up con volume persistente;
+- WebView mobile su dispositivo fisico.
+
+I gate automatici sono verdi. Quelli sopra vanno eseguiti sull'ambiente reale prima della
+pubblicazione definitiva; non indicano un fallimento del codice, ma coprono browser, storage e
+infrastruttura non disponibili in questa postazione.
+
+---
+
+## 9. Stato delle release successive
 
 | Release | Requisiti | Stato |
 |---|---|---|
@@ -827,7 +1076,8 @@ in produzione su CasaOS.
 | A | 11 — risultati manuali e Confirmed | Implementato, validato e incluso nel commit dedicato |
 | B | 1 — corpo libero puro/zavorrato | Implementato, validato e incluso nel commit dedicato |
 | B | 5 — auto-riduzione predefinita per nuove selezioni Confirmed | Implementato, validato e incluso nel commit dedicato |
-| B | 12, 2A, 4, 10 | Non iniziata |
+| B | 12 — data e ora start/end | Implementato, validato e incluso nel commit dedicato |
+| B | 2A, 4, 10 | Non iniziata |
 | C | 7 | Non iniziata |
 | D | 3, 2B, 2C | Non iniziata |
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |

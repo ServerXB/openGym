@@ -47,4 +47,30 @@ describe('state storage compatibility', () => {
     expect(JSON.parse(progressionConfigSignature(config, state.routines[0], state)).mode)
       .toBe('cardio')
   })
+
+  it('preserves active and completed workout chronology metadata on a storage round trip', () => {
+    const start = 1788019500000
+    const chronology = {
+      d: '2026-08-29', start, startTimeZone: 'Europe/Rome',
+      timeSource: 'native', timePrecision: 'millisecond'
+    }
+    const raw = JSON.stringify({
+      active: { id: 'active-1', ...chronology, entries: [] },
+      workouts: [{
+        id: 'done-1', ...chronology, end: start + 3600000,
+        endTimeZone: 'Europe/Rome', entries: []
+      }]
+    })
+    let persisted = null
+    const state = loadStoredState({
+      getItem: () => raw,
+      setItem: (_key, value) => { persisted = value }
+    }, 'state', { ...defaults, active: null })
+
+    expect(state.active).toMatchObject({ id: 'active-1', ...chronology })
+    expect(state.workouts[0]).toMatchObject({
+      id: 'done-1', ...chronology, end: start + 3600000, endTimeZone: 'Europe/Rome'
+    })
+    expect(JSON.parse(persisted).workouts[0].timePrecision).toBe('millisecond')
+  })
 })

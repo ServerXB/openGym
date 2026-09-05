@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Reliable workout start and end times.** New sessions capture one start instant, one end
+  instant and both time zones; History, workout rows opened from Calendar, workout details and
+  the finish summary show a localized date and time range. Date-only imports never expose their
+  technical placeholder, ISO offsets and seconds remain exact, repeated DST clocks show their
+  UTC offsets, and legacy JSON remains readable without a migration.
 - **Automatic recovery reduction for new Confirmed plans.** Newly selected Confirmed Rep-Range
   configurations start with the existing four-success recovery reduction enabled; legacy plans
   remain manual, and an explicit manual choice survives temporary policy or mode changes.

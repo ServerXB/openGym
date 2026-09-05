@@ -35,6 +35,7 @@ import {
 } from './lib/confirmedRepRangeAutoRest.js'
 import { resetConfirmedRepRangeRest } from './lib/confirmedRepRangeRest.js'
 import { LOAD_MODE, hasAddedBodyweightLoad, isPureBodyweight, workoutEntryLoadMode } from './lib/exercise-load-mode.js'
+import { nativeWorkoutEnd, nativeWorkoutStart, workoutChronologyParts, workoutDurationTotal, workoutTimeDisplay } from './lib/workout-time.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import {
   createRoutineExerciseId,
@@ -1093,7 +1094,7 @@ function WorkoutDetail({ w, close }) {
   const st = useStore(s => s.S)
   return <>
     <h3>{w.name}</h3>
-    <div className="muted small" style={{ marginBottom: 12 }}>{[fmtDate(w.d, true), ...durPart(w.end - w.start), fmtVol(w.vol, st.unit), ...(w.bw ? [fmtNum(w.bw) + ' ' + st.unit] : [])].join(' · ')}</div>
+    <div className="muted small" style={{ marginBottom: 12 }}>{[...workoutChronologyParts(w), fmtVol(w.vol, st.unit), ...(w.bw ? [fmtNum(w.bw) + ' ' + st.unit] : [])].join(' · ')}</div>
     {w.entries.map((e, i) => {
       const ex = EXIDX[e.id]
       return <div key={i} className="row" style={{ marginBottom: 12, alignItems: 'flex-start' }}>
@@ -1118,7 +1119,7 @@ function Calendar({ start, close }) {
   const daysIn = new Date(y, mo + 1, 0).getDate()
   const monthWs = st.workouts.filter(w => w.d.startsWith(y + '-' + String(mo + 1).padStart(2, '0')))
   const monthVol = monthWs.reduce((a, w) => a + (w.vol || 0), 0)
-  const monthMs = monthWs.reduce((a, w) => a + Math.max(0, (w.end || w.start) - w.start), 0)
+  const monthMs = workoutDurationTotal(monthWs)
   const cells = []
   for (let i = 0; i < startOffset; i++) cells.push(<div key={'e' + i} />)
   for (let d = 1; d <= daysIn; d++) {
@@ -1137,7 +1138,9 @@ function Calendar({ start, close }) {
       <h3 style={{ margin: 0 }}>{t(MONTHS_LONG[mo])} {y}</h3>
       <button className="iconbtn" onClick={() => setCur(new Date(y, mo + 1, 1))} aria-label="Next month"><Icon name="chevronRight" /></button>
     </div>
-    <div className="small muted" style={{ textAlign: 'center' }}>{monthWs.length ? `${t(monthWs.length === 1 ? '{0} workout' : '{0} workouts', monthWs.length)} · ${fmtDur(monthMs)} · ${fmtVol(monthVol, st.unit)}` : t('No workouts this month')}</div>
+    <div className="small muted" style={{ textAlign: 'center' }}>{monthWs.length
+      ? [t(monthWs.length === 1 ? '{0} workout' : '{0} workouts', monthWs.length), ...durPart(monthMs), fmtVol(monthVol, st.unit)].join(' · ')
+      : t('No workouts this month')}</div>
     <div className="cal-grid">{['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su'].map(l => <div key={l} className="cal-h">{t(l)}</div>)}{cells}</div>
     <div className="cal-legend">
       <span><i style={{ background: 'var(--acc)' }} />{t('Trained')}</span>
@@ -1156,7 +1159,7 @@ export function WorkoutRow({ w, onClick }) {
   return <div className="item" onClick={onClick}>
     <span className="lrow-i" style={{ width: 34, height: 34, borderRadius: 8, fontSize: 19 }}><Icon name={glyph} /></span>
     <div className="grow"><div className="tt">{w.name}</div>
-      <div className="ss">{[fmtDate(w.d, true), ...durPart(w.end - w.start), t('{0} sets', setsDone(w)), fmtVol(w.vol, st.unit)].join(' · ')}</div></div>
+      <div className="ss">{[...workoutChronologyParts(w), t('{0} sets', setsDone(w)), fmtVol(w.vol, st.unit)].join(' · ')}</div></div>
     {w.prs && w.prs.length > 0 && <span className="pr"><Icon name="trophy" />{w.prs.length} PR</span>}
     <Icon name="chevronRight" className="chev" />
   </div>
@@ -1169,12 +1172,13 @@ export function startFlow(routineId) {
 export function beginWorkout(routineId, bw) {
   const st = S()
   const r = routineId ? st.routines.find(x => x.id === routineId) : null
+  const timing = nativeWorkoutStart()
   // The prescription is applied as the session is built, so you walk up to the bar with the
   // right weight already on the screen instead of being told about it afterwards. `plan` is
   // kept on the entry purely so the workout can explain the number it chose.
   const entries = (r ? r.ex : []).map(cfg => buildScopedWorkoutEntry(st, cfg, r))
   update(s => {
-    s.active = { id: uid(), d: todayISO(), start: Date.now(), routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
+    s.active = { id: uid(), ...timing, routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
   })
   useUI.getState().stopRest()
   nav('/workout')
@@ -1256,9 +1260,11 @@ export const workoutCompleteSheet = () => ui().openSheet(close => <WorkoutComple
 
 function FinishSummary({ w, prs, e1prs = [], close }) {
   const st = useStore(s => s.S)
+  const chronology = workoutTimeDisplay(w)
   return <div style={{ textAlign: 'center', padding: '8px 0' }}>
     <div style={{ fontSize: 44, display: 'flex', justifyContent: 'center', color: 'var(--acc)' }}><Icon name="trophy" /></div>
     <h3 style={{ margin: '8px 0' }}>{t('Workout complete!')}</h3>
+    <div className="muted small" style={{ marginBottom: 12 }}>{[chronology.dateLabel, chronology.timeRange].filter(Boolean).join(' · ')}</div>
     <div className="tiles" style={{ textAlign: 'left' }}>
       <div className="tile"><div className="l">{t('Duration')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{fmtDur(w.end - w.start)}</div></div>
       <div className="tile"><div className="l">{t('Volume')}</div><div className="v" style={{ fontSize: '1.1rem' }}>{fmtVol(w.vol, st.unit)}</div></div>
@@ -1285,15 +1291,16 @@ export function finishWorkout() {
   if (done < total) { confirmSheet({ title: t('Finish early?'), message: t(total - done === 1 ? '{0} set still unchecked. Finish the workout now?' : '{0} sets still unchecked. Finish the workout now?', total - done), confirmText: t('Finish workout'), onConfirm: doFinishWorkout }); return }
   doFinishWorkout()
 }
-function doFinishWorkout() {
+export function doFinishWorkout() {
   const st = S()
   const A = st.active
   if (!A) return
+  const timing = nativeWorkoutEnd(A)
   // Multiple routine slots may use the same catalog exercise. They retain independent
   // progression snapshots, but contribute together to one global PR/e1RM achievement.
   const { prs, e1prs } = recordsForWorkout(st, A.entries)
   const w = {
-    id: A.id, d: A.d, start: A.start, end: Date.now(), routineId: A.routineId, name: A.name, bw: A.bw,
+    id: A.id, d: A.d, start: A.start, ...timing, routineId: A.routineId, name: A.name, bw: A.bw,
     // `target` (what the session prescribed) is kept alongside the sets: without it a
     // finished workout cannot say whether it hit its reps, and a timed session reads back
     // as "0 reps". It is what the progression engine works from.
@@ -1309,4 +1316,10 @@ function doFinishWorkout() {
   useUI.getState().stopRest()
   beep(snd(), 880, 0.15); beep(snd(), 1100, 0.15, 0.18); beep(snd(), 1320, 0.3, 0.36)
   ui().openSheet(close => <FinishSummary w={w} prs={prs} e1prs={e1prs} close={close} />, { kind: 'center', locked: true })
+}
+
+export function discardActiveWorkout() {
+  update(s => { s.active = null })
+  useUI.getState().stopRest()
+  nav('/home')
 }

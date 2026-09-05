@@ -19,7 +19,8 @@
 // building a DOM.
 
 import { EXDB, EXIDX } from './exercises.js'
-import { uid } from './format.js'
+import { localTZ, uid } from './format.js'
+import { workoutDateKey } from './workout-time.js'
 
 /* ----------------------------------------------------------------- CSV ---- */
 
@@ -246,27 +247,83 @@ const LB_TO_KG = 0.45359237
 const p2 = n => String(n).padStart(2, '0')
 const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 }
 
-/** "2020-12-30 18:51:52" · "2024-03-07" · "22 Dec 2025, 08:00" · "07/03/2024" -> { d, t } */
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+const isLeapYear = y => y % 4 === 0 && (y % 100 !== 0 || y % 400 === 0)
+const validDate = (y, m, d) => {
+  if (![y, m, d].every(Number.isInteger) || y < 1 || y > 9999 || m < 1 || m > 12 || d < 1) return false
+  return d <= (m === 2 && isLeapYear(y) ? 29 : DAYS_IN_MONTH[m - 1])
+}
+const whenOf = (yRaw, mRaw, dRaw, hRaw, minuteRaw, secondRaw, fractionRaw) => {
+  const y = Number(yRaw), m = Number(mRaw), d = Number(dRaw)
+  if (!validDate(y, m, d)) return null
+  const date = `${String(y).padStart(4, '0')}-${p2(m)}-${p2(d)}`
+  if (hRaw === undefined) return { d: date, t: null, precision: 'date-only' }
+  const h = Number(hRaw), minute = Number(minuteRaw), second = secondRaw === undefined ? 0 : Number(secondRaw)
+  if (![h, minute, second].every(Number.isInteger) || h < 0 || h > 23 || minute < 0 || minute > 59 || second < 0 || second > 59) return null
+  const millisecond = fractionRaw ? Math.floor(Number(`0${fractionRaw}`) * 1000) : 0
+  return {
+    d: date,
+    t: h * 3600000 + minute * 60000 + second * 1000 + millisecond,
+    precision: fractionRaw ? 'millisecond' : secondRaw === undefined ? 'minute' : 'second'
+  }
+}
+
+const withExplicitOffset = (when, offsetRaw) => {
+  if (!when || when.t == null || !offsetRaw) return when
+  let offset = 'Z'
+  if (offsetRaw !== 'Z') {
+    const match = offsetRaw.match(/^([+-])(\d{2}):?(\d{2})$/)
+    if (!match || Number(match[2]) > 23 || Number(match[3]) > 59) return null
+    offset = `${match[1]}${match[2]}:${match[3]}`
+  }
+  const hour = Math.floor(when.t / 3600000)
+  const minute = Math.floor(when.t % 3600000 / 60000)
+  const second = Math.floor(when.t % 60000 / 1000)
+  const millisecond = when.t % 1000
+  const iso = `${when.d}T${p2(hour)}:${p2(minute)}:${p2(second)}.${String(millisecond).padStart(3, '0')}${offset}`
+  const epoch = Date.parse(iso)
+  return Number.isFinite(epoch) ? { ...when, epoch, offset: offset === 'Z' ? 'UTC' : offset } : null
+}
+
+/** "2020-12-30 18:51:52" · "2024-03-07" · "22 Dec 2025, 08:00" · "07/03/2024" -> { d, t, precision } */
 export function parseWhen(s) {
   const v = String(s || '').trim()
-  let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2}))?/)
-  if (m) return { d: `${m[1]}-${p2(m[2])}-${p2(m[3])}`, t: hm(m[4], m[5]) }
-  m = v.match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2}))?/)
-  if (m && MON[m[2].toLowerCase()]) return { d: `${m[3]}-${p2(MON[m[2].toLowerCase()])}-${p2(m[1])}`, t: hm(m[4], m[5]) }
-  m = v.match(/^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2}))?/)
-  if (m && MON[m[1].toLowerCase()]) return { d: `${m[3]}-${p2(MON[m[1].toLowerCase()])}-${p2(m[2])}`, t: hm(m[4], m[5]) }
+  let m = v.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(\.\d+)?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?)?$/)
+  if (m) return withExplicitOffset(whenOf(m[1], m[2], m[3], m[4], m[5], m[6], m[7]), m[8])
+  m = v.match(/^(\d{1,2})\s+([A-Za-z]{3})[a-z]*\.?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (m && MON[m[2].toLowerCase()]) return whenOf(m[3], MON[m[2].toLowerCase()], m[1], m[4], m[5], m[6])
+  m = v.match(/^([A-Za-z]{3})[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})(?:,?\s+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
+  if (m && MON[m[1].toLowerCase()]) return whenOf(m[3], MON[m[1].toLowerCase()], m[2], m[4], m[5], m[6])
   // Day-first when ambiguous: FitNotes/Strong/Hevy all write unambiguous dates, so a
   // bare numeric one came through a spreadsheet, and those are usually European.
-  m = v.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:[, ]+(\d{1,2}):(\d{2}))?/)
+  m = v.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{4})(?:[, ]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/)
   if (m) {
     const [, a, b, y] = m
     const day = +a > 12 ? a : +b > 12 ? b : a
     const mon = day === a ? b : a
-    return { d: `${y}-${p2(mon)}-${p2(day)}`, t: hm(m[4], m[5]) }
+    return whenOf(y, mon, day, m[4], m[5], m[6])
   }
   return null
 }
-const hm = (h, mi) => (h === undefined ? null : (parseInt(h, 10) || 0) * 3600000 + (parseInt(mi, 10) || 0) * 60000)
+
+// A clock without an explicit offset is a local wall-clock value. Construct each instant
+// separately: adding milliseconds to midnight would be wrong on DST days. Explicit ISO
+// offsets already carry an absolute epoch and bypass this conversion.
+const localEpoch = (d, t = 0) => {
+  const [y, m, day] = d.split('-').map(Number)
+  const hour = Math.floor(t / 3600000)
+  const minute = Math.floor(t % 3600000 / 60000)
+  const second = Math.floor(t % 60000 / 1000)
+  const millisecond = t % 1000
+  const value = new Date(y, m - 1, day, hour, minute, second, millisecond)
+  // A spring-forward wall clock such as Europe/Rome 02:30 does not exist. Date would silently
+  // roll it to 03:30, which is not the imported value; reject that row instead.
+  if (value.getFullYear() !== y || value.getMonth() !== m - 1 || value.getDate() !== day ||
+    value.getHours() !== hour || value.getMinutes() !== minute || value.getSeconds() !== second ||
+    value.getMilliseconds() !== millisecond) return null
+  return value.getTime()
+}
+const epochOfWhen = when => when?.epoch ?? localEpoch(when.d, when.t || 0)
 
 /** "HH:MM:SS" · "MM:SS" · "90" -> minutes */
 function toMinutes(v) {
@@ -302,6 +359,7 @@ export function parseWorkoutCSV(text, { unit = 'kg' } = {}) {
 
   const resolved = new Map()          // exercise name -> dataset id | null, resolved once
   const byDate = new Map()
+  const importTimeZone = localTZ()
   const created = new Map()
   const unmatched = new Set()
   let sets = 0, skipped = 0, matched = 0, warmups = 0, rpeSets = 0, rirSets = 0
@@ -313,7 +371,7 @@ export function parseWorkoutCSV(text, { unit = 'kg' } = {}) {
     const r = rows[i]
     const name = cell(r, 'exercise')
     const when = parseWhen(cell(r, dateCol))
-    if (!name || !when) { skipped++; continue }
+    if (!name || !when || (when.t != null && epochOfWhen(when) == null)) { skipped++; continue }
 
     // explicit kg/lb columns beat a generic column plus a unit column
     let w = 0, rowUnit = ''
@@ -369,13 +427,23 @@ export function parseWorkoutCSV(text, { unit = 'kg' } = {}) {
       else if (rpe != null) { set.rpe = rpe; rpeSets++ }
     }
 
-    let day = byDate.get(when.d)
+    // An explicit ISO offset is an absolute instant. Store and group it in the local import
+    // zone instead of pretending its written wall clock already belonged to this device.
+    const workoutDate = when.epoch == null ? when.d : workoutDateKey(when.epoch, importTimeZone)
+    let day = byDate.get(workoutDate)
     if (!day) {
-      day = { ex: new Map(), name: cell(r, 'workoutName') || '', start: when.t, end: null }
-      byDate.set(when.d, day)
+      day = { ex: new Map(), name: cell(r, 'workoutName') || '', start: when, end: null }
+      byDate.set(workoutDate, day)
+    } else if (day.start.t == null && when.t != null) {
+      // A later valid row can restore a clock omitted from the first row of the day.
+      day.start = when
     }
     if (!day.name) day.name = cell(r, 'workoutName') || ''
-    if (map.endTime !== undefined) { const e = parseWhen(cell(r, 'endTime')); if (e && e.t != null) day.end = e.t }
+    if (map.endTime !== undefined) {
+      const e = parseWhen(cell(r, 'endTime'))
+      const endEpoch = e?.t != null ? epochOfWhen(e) : null
+      if (endEpoch != null && (!day.end || endEpoch > epochOfWhen(day.end))) day.end = e
+    }
     else if (map.time !== undefined && !map.seconds && reps) { /* FitNotes' Time is per-set */ }
     if (!day.ex.has(id)) day.ex.set(id, [])
     day.ex.get(id).push(set)
@@ -408,12 +476,18 @@ export function parseWorkoutCSV(text, { unit = 'kg' } = {}) {
       const mx = Math.max(0, ...conv2.map(s => s.w || 0))
       return { id, sets: conv2, topW: mx || null }
     })
-    const base = new Date(d + 'T00:00:00').getTime()
-    const start = base + (day.start ?? 18 * 3600000)
-    const end = day.end != null ? base + day.end : start
+    const hasClock = day.start.t != null
+    const start = hasClock ? epochOfWhen(day.start) : localEpoch(d, 18 * 3600000)
+    const importedEnd = hasClock && day.end ? epochOfWhen(day.end) : start
+    const end = importedEnd > start ? importedEnd : start
     const w = {
       id: 'iw' + uid(), d, start, end: end > start ? end : start,
       routineId: null, name: day.name || 'Imported', entries, prs: [],
+      timeSource: 'import', timePrecision: hasClock ? day.start.precision : 'date-only',
+    }
+    if (hasClock) {
+      w.startTimeZone = importTimeZone
+      if (day.end) w.endTimeZone = importTimeZone
     }
     w.vol = entries.reduce((a, e) => a + e.sets.reduce((b, s) => b + (s.w || 0) * (s.r || 0), 0), 0)
     return w
@@ -474,7 +548,9 @@ export function parseBodyweight(text, { unit = 'kg' } = {}) {
       const when = parseWhen(String(rows[i][dCol] ?? ''))
       const w = num(rows[i][wCol])
       if (!when || !w) continue
-      out.set(when.d, { w, t: new Date(when.d).getTime() + (when.t ?? 0) })
+      const timestamp = when.epoch ?? localEpoch(when.d, when.t ?? 0)
+      if (timestamp == null) continue
+      out.set(when.d, { w, t: timestamp })
     }
   }
 

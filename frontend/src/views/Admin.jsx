@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { api } from '../lib/api.js'
-import { fmtDate, fmtNum, fmtVol, fmtDur } from '../lib/format.js'
+import { fmtDate, fmtNum, fmtVol } from '../lib/format.js'
+import { workoutChronologyParts } from '../lib/workout-time.js'
 import { workoutVolume, setsDone } from '../lib/history.js'
 import { confirmSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
@@ -56,7 +57,9 @@ function UserDetail({ id, onChanged, close }) {
     {d.workouts.length ? <div className="list" style={{ gap: 0 }}>
       {d.workouts.slice(0, 60).map(w => <div key={w.id} className="row between" style={{ padding: '9px 2px', borderBottom: '1px solid var(--sep)' }}>
         <div><div className="small" style={{ fontWeight: 600 }}>{w.name}</div>
-          <div className="dim" style={{ fontSize: '.72rem' }}>{fmtDate(w.d, true)} · {fmtDur((w.end || w.start) - w.start)} · {setsDone(w)} sets{w.prs?.length ? ' · ' + w.prs.length + ' PR' : ''}</div></div>
+          <div className="dim" style={{ fontSize: '.72rem' }}>{[
+            ...workoutChronologyParts(w), `${setsDone(w)} sets`, ...(w.prs?.length ? [w.prs.length + ' PR'] : [])
+          ].join(' · ')}</div></div>
         <span className="small muted">{fmtVol(w.vol ?? workoutVolume(w), d.unit)}</span>
       </div>)}
     </div> : <div className="empty small">No workouts logged.</div>}
