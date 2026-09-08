@@ -29,7 +29,9 @@ const PLAN_TARGET_FIELDS = [
 
 export function targetForPrescription(config = {}, plan = {}) {
   const pureBodyweight = isPureBodyweight(config)
-  const target = { ...config }
+  // Equipment ids belong to the local profile and are resolved separately at workout start.
+  // Keeping them out of the prescription avoids duplicating mutable configuration in History.
+  const { equipmentUse: _equipmentUse, ...target } = config
   if (plan.policy === 'confirmed_rep_range') target.prog = plan.policy
   if (plan.reps != null) {
     target.reps = plan.reps

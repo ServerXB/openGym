@@ -346,6 +346,82 @@ describe('progression scope compatibility helpers', () => {
     expect(new Set([external, pure, added]).size).toBe(3)
   })
 
+  it('separates load meaning but ignores local equipment ids and implement quantity', () => {
+    const equipment = (loadSemantics, overrides = {}) => ({
+      equipmentUse: {
+        mode: 'item', profileId: 'gym', itemId: 'bar', catalogEquipment: 'barbell',
+        loadSemantics, implementCount: 1, ...overrides
+      }
+    })
+    const total = progressionConfigSignature(lift(equipment('total')))
+    const anotherLocalBar = progressionConfigSignature(lift(equipment('total', {
+      profileId: 'home', itemId: 'home-bar', implementCount: 2
+    })))
+    const perImplement = progressionConfigSignature(lift(equipment('per_implement')))
+
+    expect(anotherLocalBar).toBe(total)
+    expect(progressionConfigSignature(lift())).toBe(total)
+    expect(perImplement).not.toBe(total)
+    expect(progressionConfigSignature(lift()))
+      .toBe(progressionConfigSignature(lift({ equipmentUse: { mode: 'none' } })))
+  })
+
+  it('keeps history when equipment selection matches legacy meaning and forks only on a meaning change', () => {
+    const state = {
+      routines: [{ id: 'a', ex: [lift()] }, { id: 'b', ex: [lift()] }],
+      progressionWeights: {}
+    }
+    normalizeProgressionScopes(state)
+    const firstId = state.routines[0].ex[0].progressionId
+    expect(state.routines[1].ex[0].progressionId).toBe(firstId)
+
+    state.routines[0].ex[0].equipmentUse = {
+      mode: 'item', profileId: 'gym', itemId: 'bar', loadSemantics: 'total', implementCount: 1
+    }
+    normalizeProgressionScopes(state)
+    expect(state.routines[0].ex[0].progressionId).toBe(firstId)
+
+    state.routines[0].ex[0].equipmentUse = {
+      ...state.routines[0].ex[0].equipmentUse,
+      profileId: 'home', itemId: 'home-bar', implementCount: 2
+    }
+    normalizeProgressionScopes(state)
+    expect(state.routines[0].ex[0].progressionId).toBe(firstId)
+
+    state.routines[0].ex[0].equipmentUse.loadSemantics = 'per_implement'
+    normalizeProgressionScopes(state)
+    expect(state.routines[0].ex[0].progressionId).not.toBe(firstId)
+    expect(state.routines[1].ex[0].progressionId).toBe(firstId)
+  })
+
+  it('preserves existing progression ids and working load when upgrading a pre-equipment signature', () => {
+    const sharedId = 'progression:existing-shared'
+    const first = lift({ routineExerciseId: 'slot-a', progressionId: sharedId })
+    const second = lift({ routineExerciseId: 'slot-b', progressionId: sharedId })
+    const current = JSON.parse(progressionConfigSignature(first))
+    delete current.equipmentLoadSemantics
+    const oldSignature = JSON.stringify(current)
+    first.progressionSignature = oldSignature
+    second.progressionSignature = oldSignature
+    const state = {
+      routines: [{ id: 'a', ex: [first] }, { id: 'b', ex: [second] }],
+      progressionWeights: { [sharedId]: { w: 84, d: '2026-09-01' } },
+      workouts: [{
+        id: 'completed-before-equipment', routineId: 'a',
+        entries: [{ id: first.id, progressionId: sharedId, sets: [{ w: 82, r: 10, done: true }] }]
+      }]
+    }
+    const completedBefore = JSON.stringify(state.workouts)
+
+    normalizeProgressionScopes(state)
+
+    expect(state.routines[0].ex[0].progressionId).toBe(sharedId)
+    expect(state.routines[1].ex[0].progressionId).toBe(sharedId)
+    expect(state.progressionWeights[sharedId]).toEqual({ w: 84, d: '2026-09-01' })
+    expect(state.routines[0].ex[0].progressionSignature).toContain('equipmentLoadSemantics')
+    expect(JSON.stringify(state.workouts)).toBe(completedBefore)
+  })
+
   it('ignores non-material load increments for pure reps but keeps timed seconds increments', () => {
     expect(progressionConfigSignature(lift({ bodyweight: true, weight: 0, inc: 2 })))
       .toBe(progressionConfigSignature(lift({ bodyweight: true, weight: 0, inc: 5 })))

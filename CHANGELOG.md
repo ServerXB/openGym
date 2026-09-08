@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Equipment profiles and immutable loading guidance.** Configure each gym's bars, dumbbells,
+  plates, fixed weights and machines with real quantities; exercise slots can use safe catalog
+  matching or an explicit tool. A deterministic non-greedy solver shows exact or nearest loads,
+  treats a dumbbell entry as the weight of one dumbbell, and never changes the prescribed target.
+  Every workout freezes its profile at start, so later equipment changes are future-only; shared
+  plans omit private profile, tool and inventory identifiers.
 - **Reliable workout start and end times.** New sessions capture one start instant, one end
   instant and both time zones; History, workout rows opened from Calendar, workout details and
   the finish summary show a localized date and time range. Date-only imports never expose their

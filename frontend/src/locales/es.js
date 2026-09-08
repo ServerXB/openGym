@@ -1,8 +1,10 @@
 // Spanish UI strings. Keys are the English source strings (see lib/i18n.js).
 import confirmedRepRangeFallback from '../lib/confirmedRepRangeLocaleFallback.js'
+import equipmentFallback from '../lib/equipmentLocaleFallback.js'
 
 export default {
   ...confirmedRepRangeFallback,
+  ...equipmentFallback,
   'Confirm': 'Confirmar',
   'Cancel': 'Cancelar',
   'Delete': 'Eliminar',

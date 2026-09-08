@@ -13,6 +13,9 @@ export const DEF = {
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
   exWeights: {}, progressionWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
+  // User-defined bars, dumbbells, plates and machines. Profiles are ordinary synced state;
+  // a normalized deep copy is frozen into each workout so later gym changes are not retroactive.
+  equipmentProfiles: [], activeEquipmentProfileId: null,
   // Optional per-exercise controls that change how history is interpreted without rewriting
   // finished workouts. Missing in legacy profiles/backups and therefore always defaulted.
   progressionControls: {},
@@ -30,7 +33,8 @@ function loadState() {
   })
 }
 
-const hasData = st => !!((st.workouts || []).length || (st.routines || []).length || (st.bodyweight || []).length)
+const hasData = st => !!((st.workouts || []).length || (st.routines || []).length
+  || (st.bodyweight || []).length || (st.equipmentProfiles || []).length)
 
 export const useStore = create((set, get) => {
   let pushTm = null

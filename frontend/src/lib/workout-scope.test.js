@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { normalizeProgressionScopes } from './progression-scope.js'
-import { buildScopedWorkoutEntry, completedWorkoutEntries } from './workout-scope.js'
+import { appendScopedWorkoutEntry, buildScopedWorkoutEntry, completedWorkoutEntries } from './workout-scope.js'
 
 describe('workout progression scope lifecycle', () => {
   it('snapshots both ids at start and keeps them unchanged through refresh and finish', () => {
@@ -35,6 +35,80 @@ describe('workout progression scope lifecycle', () => {
     }])
     expect(completed).not.toHaveProperty('routineExerciseId')
     expect(completed).not.toHaveProperty('progressionId')
+  })
+
+  it('resolves equipment once, keeps local ids out of the target and persists the binding at finish', () => {
+    const equipmentSnapshot = {
+      schemaVersion: 1, id: 'gym', name: 'Gym', unit: 'kg', workoutUnit: 'kg',
+      items: [{
+        id: 'bar', label: '20 kg bar', kind: 'symmetric_bar', catalogEquipment: 'barbell',
+        tareWeight: 20, implementCount: 1, sideCount: 2,
+        denominations: [{ weight: 20, count: 2 }, { weight: 5, count: 2 }]
+      }]
+    }
+    const state = {
+      unit: 'kg', restSec: 90, workouts: [], exWeights: {}, progressionWeights: {}, progressionControls: {}
+    }
+    const config = {
+      id: 'bench', sets: 1, reps: 8, weight: 70,
+      equipmentUse: {
+        mode: 'item', profileId: 'gym', itemId: 'bar',
+        catalogEquipment: 'barbell', loadSemantics: 'total'
+      }
+    }
+
+    const active = buildScopedWorkoutEntry(state, config, null, equipmentSnapshot)
+    expect(active.equipmentUse).toMatchObject({
+      status: 'resolved', profileId: 'gym', itemId: 'bar', source: 'slot_override'
+    })
+    expect(active.target).not.toHaveProperty('equipmentUse')
+
+    active.sets[0].done = true
+    const [finished] = completedWorkoutEntries([JSON.parse(JSON.stringify(active))])
+    expect(finished.equipmentUse).toEqual(active.equipmentUse)
+  })
+
+  it('keeps legacy workouts without equipment snapshots readable', () => {
+    const [finished] = completedWorkoutEntries([{
+      id: 'legacy', sets: [{ w: 40, r: 10, done: true }], target: { sets: 1, reps: 10 }
+    }])
+    expect(finished).not.toHaveProperty('equipmentUse')
+  })
+
+  it('uses the workout-start snapshot for an exercise added after profile settings change', () => {
+    const frozen = {
+      schemaVersion: 1, id: 'gym', name: 'Gym', unit: 'kg', workoutUnit: 'kg',
+      items: [{
+        id: 'old-bar', label: 'Old bar', kind: 'symmetric_bar', catalogEquipment: 'barbell',
+        tareWeight: 20, implementCount: 1, sideCount: 2, denominations: []
+      }]
+    }
+    const state = {
+      unit: 'kg', restSec: 90, workouts: [], exWeights: {}, progressionWeights: {}, progressionControls: {},
+      activeEquipmentProfileId: 'gym',
+      equipmentProfiles: [{ ...frozen, items: [{ ...frozen.items[0], id: 'new-bar', tareWeight: 15 }] }],
+      active: { equipmentSnapshot: frozen, entries: [], cur: 0 }
+    }
+    const entry = appendScopedWorkoutEntry(state, {
+      id: '0025', sets: 1, reps: 8, weight: 70
+    })
+    expect(entry.equipmentUse).toMatchObject({ status: 'resolved', itemId: 'old-bar' })
+    expect(state.active.cur).toBe(0)
+    expect(state.active.equipmentSnapshot.items[0].tareWeight).toBe(20)
+  })
+
+  it('does not adopt a profile activated after a profile-less workout started', () => {
+    const state = {
+      unit: 'kg', restSec: 90, workouts: [], exWeights: {}, progressionWeights: {}, progressionControls: {},
+      activeEquipmentProfileId: 'gym',
+      equipmentProfiles: [{
+        id: 'gym', name: 'Gym', unit: 'kg',
+        items: [{ id: 'bar', label: 'Bar', kind: 'symmetric_bar', catalogEquipment: 'barbell' }]
+      }],
+      active: { entries: [], cur: 0 }
+    }
+    const entry = appendScopedWorkoutEntry(state, { id: '0025', sets: 1, reps: 8, weight: 70 })
+    expect(entry).not.toHaveProperty('equipmentUse')
   })
 
   it('retains a fully skipped Confirmed prescription but still omits unlogged other policies', () => {

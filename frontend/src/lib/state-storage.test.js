@@ -3,7 +3,10 @@ import { loadStoredState } from './state-storage.js'
 import { registerCustom } from './exercises.js'
 import { progressionConfigSignature } from './progression-scope.js'
 
-const defaults = { routines: [], workouts: [], exWeights: {}, progressionWeights: {} }
+const defaults = {
+  routines: [], workouts: [], exWeights: {}, progressionWeights: {},
+  equipmentProfiles: [], activeEquipmentProfileId: null
+}
 
 describe('state storage compatibility', () => {
   it('returns a valid normalized profile even when persisting its backfill fails', () => {
@@ -72,5 +75,30 @@ describe('state storage compatibility', () => {
       id: 'done-1', ...chronology, end: start + 3600000, endTimeZone: 'Europe/Rome'
     })
     expect(JSON.parse(persisted).workouts[0].timePrecision).toBe('millisecond')
+  })
+
+  it('defaults legacy JSON and round-trips equipment profiles plus immutable snapshots', () => {
+    const legacy = loadStoredState({
+      getItem: () => JSON.stringify({ routines: [], workouts: [] }), setItem: () => {}
+    }, 'state', defaults)
+    expect(legacy).toMatchObject({ equipmentProfiles: [], activeEquipmentProfileId: null })
+
+    const equipmentSnapshot = {
+      schemaVersion: 1, id: 'gym', name: 'Gym', unit: 'kg', workoutUnit: 'kg',
+      items: [{ id: 'bar', label: 'Bar', kind: 'symmetric_bar', tareWeight: 20, denominations: [] }]
+    }
+    let persisted
+    const state = loadStoredState({
+      getItem: () => JSON.stringify({
+        equipmentProfiles: [equipmentSnapshot], activeEquipmentProfileId: 'gym',
+        active: { id: 'active', equipmentSnapshot, entries: [] },
+        workouts: [{ id: 'done', equipmentSnapshot, entries: [] }]
+      }),
+      setItem: (_key, value) => { persisted = JSON.parse(value) }
+    }, 'state', { ...defaults, active: null })
+
+    expect(state.active.equipmentSnapshot.items[0].tareWeight).toBe(20)
+    expect(state.workouts[0].equipmentSnapshot.workoutUnit).toBe('kg')
+    expect(persisted.equipmentProfiles[0].id).toBe('gym')
   })
 })

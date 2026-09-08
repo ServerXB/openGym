@@ -1,11 +1,11 @@
 # openGym — Analisi funzionale e architetturale del backlog prodotto
 
-- Data: 2026-09-05
+- Data: 2026-09-08
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Stato: Release A implementata e validata; Release B requisiti 1, 5 e 12 implementati e validati
+- Stato: Release A implementata e validata; Release B requisiti 1, 5 e 12 implementati e validati; Release C requisito 7 implementato e validato
 - Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: cronologia start/end deterministica, localizzata e compatibile con import e storico legacy
+- Ultimo aggiornamento funzionale: profili attrezzatura, solver deterministico e snapshot immutabili del carico
 - Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
 
 ## 1. Obiettivo
@@ -32,16 +32,16 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 4 | Scorrere tra routine | Navigazione attuale richiede ritorno alla lista | P1 | Media |
 | 5 | Auto-riduzione recupero attiva di default | Implementato e validato solo sugli eventi di nuova selezione; decoder legacy invariato | P1 | Piccola |
 | 6 | Istanze dello stesso esercizio | Implementato e validato: slot stabili, gruppi compatibili, snapshot e reader legacy | P0 | Grande |
-| 7 | Calcolo attrezzatura/piastre | Nuova epic; il catalogo non contiene abbastanza informazioni | P2 | Grande |
+| 7 | Calcolo attrezzatura/piastre | Implementato e validato: profili, override slot, solver esatto, snapshot e guida accessibile | P2 | Grande |
 | 8 | Peso da Withings | Fattibile in lettura; OAuth/polling server-side | P3 | Grande |
 | 9 | Dati Polar Flow | Fattibile solo come arricchimento in lettura | P3 | Grande |
 | 10 | Alias esercizi | Nuova funzione locale e sincronizzabile | P1 | Media |
 | 11 | Adattamento dopo modifiche manuali | Implementato e validato: livello dimostrato, outcome, serie opzionali e carico uniforme | P0 | Grande |
 | 12 | Orario/data inizio e fine | Implementato e validato: lifecycle deterministico, UI localizzata, import e legacy | P1 | Piccola/Media |
 
-Le due correzioni da affrontare per prime sono 6 e 11. Entrambe decidono quale storico appartiene
-a una prescrizione; costruire sopra di esse attrezzatura, recovery reset o collegamento Polar
-senza prima separare le istanze renderebbe più costosa una migrazione successiva.
+Le correzioni 6 e 11 sono state affrontate prima del requisito 7 perché decidono quale storico
+appartiene a una prescrizione. Questo ha permesso di aggiungere l'attrezzatura per slot senza
+contaminare gruppi di progressione condivisi o indipendenti.
 
 ## 3. Dipendenze consigliate
 
@@ -515,7 +515,12 @@ recupero usano `progressionId`. PR, statistiche aggregate e alias continuano a u
 
 ### 5.7 Attrezzatura e pesi da caricare
 
-#### Stato attuale
+#### Stato dell'implementazione
+
+Implementato nella Release C con gate dedicati documentati in
+`OPEN_GYM_RELEASE_TEST_REPORT.md`. La soluzione mantiene il catalogo come semplice suggerimento:
+quando non esiste una corrispondenza univoca usa un override esplicito oppure non calcola il
+carico, senza inventare una formula.
 
 Il catalogo possiede un campo `eq` con categorie come barbell, olympic barbell, ez barbell,
 trap bar, dumbbell, kettlebell e macchine. Non specifica però:
@@ -530,7 +535,7 @@ trap bar, dumbbell, kettlebell e macchine. Non specifica però:
 Quindi openGym può suggerire un tipo da `eq`, ma non può calcolare in modo sicuro senza
 configurazione e override.
 
-#### UX raccomandata
+#### UX adottata
 
 In Impostazioni:
 
@@ -556,7 +561,7 @@ Il messaggio deve aggiornarsi subito se il peso della prossima serie cambia. Dev
 testo, non solo colore. Il verde deve usare un token `success` con contrasto verificato in tema
 chiaro/scuro, non l'accento personalizzabile.
 
-#### Modello dati proposto
+#### Modello dati adottato
 
 ```json
 {
@@ -599,7 +604,7 @@ Modalità minime:
 Bodyweight, bande e macchine assistite richiedono adattatori diversi; non deve esistere una
 formula generica che finga di coprire ogni attrezzo.
 
-#### Calcolo
+#### Calcolo adottato
 
 - Precisione a centesimi.
 - Rispetto di quantità e simmetria.
@@ -627,7 +632,7 @@ Se il bilanciere passa da 20 a 15 kg:
 Un esercizio aggiunto durante la sessione usa il profilo congelato all'avvio, non quello appena
 modificato nelle impostazioni.
 
-#### Test necessari
+#### Test automatici e gate
 
 - bilanciere 70/20, piastre frazionarie e quantità insufficienti;
 - manubrio singolo/coppia e peso per mano;
@@ -638,6 +643,17 @@ modificato nelle impostazioni.
 - refresh, backup, sync e Docker down/up;
 - workout legacy senza snapshot;
 - contrasto e comprensione del messaggio senza colore.
+
+Risultato corrente: **97 test mirati superati**, **593 test complessivi superati**, build Vite
+riuscita, 11 locale sincronizzate e contrasto success misurato a **6,51:1** nel tema scuro e
+**5,15:1** nel tema chiaro. Refresh/storage, export/import, cambio profilo prima/durante/dopo,
+stesso esercizio in progression group diversi, corpo libero, unità discordanti e inventari
+impossibili sono coperti automaticamente. Il solver coincide inoltre con un enumeratore
+brute-force indipendente su **2.000 casi deterministici**. Un controllo riproducibile in Edge
+headless a 320 px ha verificato schermate, editor dell'attrezzo, assenza di overflow, guida
+esatta, semantica accessibile e temi chiaro/scuro. Docker/CasaOS, due browser autenticati, screen
+reader e dispositivo fisico restano gate manuali esplicitati nel report, perché dipendono
+dall'ambiente reale.
 
 ### 5.8 Recupero del peso da Withings
 
@@ -1207,7 +1223,7 @@ Definizioni:
 | 6 | 2A | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
 | 7 | 4 | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
 | 8 | 10 | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
-| 9 | 7 | P2 | Profili attrezzatura, solver e snapshot | Forte valore in palestra, ma richiede modello e UI dedicati; nessuna retroattività | 1, 6, snapshot workout |
+| 9 | 7 | P2 | Profili attrezzatura, solver e snapshot — completato | Profili per palestra, singolo manubrio, inventario, guida accessibile e nessuna retroattività | 1, 6, snapshot workout |
 | 10 | 3 | P2 | Documentazione API interna e API pubblica v1 sicura | Abilita pairing watch, Withings e Polar; richiede DTO, auth e concorrenza | modello dati stabilizzato |
 | 11 | 2B/2C | P2 | Sincronizzazione server e controllo da smartwatch | Richiede API/pairing e un companion specifico per piattaforma | 2A, 3 |
 | 12 | 8 | P3 | Recupero peso da Withings | Utile ma dipende da OAuth, secret store e account reale | ID 3 e ID 12 |
@@ -1242,10 +1258,10 @@ Questi requisiti possono essere consegnati in commit separati e verificati uno p
 
 #### Release C — Attrezzatura
 
-1. Profili palestra e semantica del carico.
-2. Peso del singolo manubrio e quantità.
-3. Solver piastre/pesi disponibili.
-4. Snapshot immutabile e messaggio verde durante l'esercizio.
+1. Profili palestra e semantica del carico — completato e validato.
+2. Peso del singolo manubrio e quantità — completato e validato.
+3. Solver piastre/pesi disponibili — completato e validato.
+4. Snapshot immutabile e messaggio verde durante l'esercizio — completato e validato.
 
 #### Release D — Piattaforma e smartwatch
 
@@ -1311,11 +1327,11 @@ eventuali problemi del calcolo da quelli introdotti dalle successive modifiche U
 
 ### Fase 4 — attrezzatura
 
-1. Modello profili/attrezzi e convenzioni.
-2. Resolver catalogo + override per slot.
-3. Solver deterministico delle piastre.
-4. Snapshot nel workout.
-5. Messaggio success durante l'esecuzione.
+1. Modello profili/attrezzi e convenzioni — completato.
+2. Resolver catalogo + override per slot — completato.
+3. Solver deterministico delle piastre — completato.
+4. Snapshot nel workout — completato.
+5. Messaggio success durante l'esecuzione — completato.
 
 ### Fase 5 — API e integrazioni
 
@@ -1345,14 +1361,13 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 10. `feat: add accessible routine navigation rail`
 11. `feat: add personal exercise aliases and shared search`
 12. `feat: persist deterministic rest timers`
-13. `feat: add equipment profiles and load semantics`
-14. `feat: snapshot equipment and show loading guidance`
-15. `docs: describe internal api and add openapi contract`
-16. `feat: add scoped personal access tokens and read api`
-17. `feat: sync revisioned rest timers and pair trusted devices`
-18. `feat: add the first smartwatch companion controls`
-19. `feat: import withings weight with provenance`
-20. `feat: link polar training enrichment`
+13. `feat: add equipment profiles and immutable loading guidance` — Release C, requisito 7 in un commit unico
+14. `docs: describe internal api and add openapi contract`
+15. `feat: add scoped personal access tokens and read api`
+16. `feat: sync revisioned rest timers and pair trusted devices`
+17. `feat: add the first smartwatch companion controls`
+18. `feat: import withings weight with provenance`
+19. `feat: link polar training enrichment`
 
 ## 10. File probabilmente coinvolti
 
@@ -1365,7 +1380,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 | Routine | `frontend/src/views/Plan.jsx`, `frontend/src/views/RoutineEdit.jsx` |
 | Corpo libero/config | `frontend/src/sheets.jsx`, `frontend/src/lib/history.js` |
 | Alias/ricerca | `frontend/src/lib/exercises.js`, `frontend/src/views/Library.jsx`, `frontend/src/sheets.jsx` |
-| Attrezzatura | nuovi `equipment-load.js`/test, `sheets.jsx`, `Workout.jsx` |
+| Attrezzatura | `frontend/src/lib/equipment-load.js`, `frontend/src/views/Equipment.jsx`, `frontend/src/components/EquipmentGuide.jsx`, `sheets.jsx`, `Workout.jsx` e test dedicati |
 | Timestamp/import | `frontend/src/lib/format.js`, `frontend/src/lib/import-csv.js` |
 | API/provider | `api/server.js`, nuovi moduli API/OAuth/provider, `docs/openapi.yaml`, `docs/API.md` |
 | Presentazione | `frontend/src/index.css` e tutti gli 11 pacchetti locale |

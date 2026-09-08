@@ -227,6 +227,36 @@ describe('plan sharing with Confirmed Rep-Range', () => {
     expect(exerciseLoadMode(added)).toBe(LOAD_MODE.ADDED_BODYWEIGHT)
   })
 
+  it('shares only portable equipment semantics and strips local or hostile ids', () => {
+    const id = 'portable-equipment-lift'
+    const bundle = buildPlanBundle({
+      routines: [{ id: 'sender', name: 'Sender', ex: [{
+        id, sets: 3, reps: 8, weight: 70,
+        equipmentUse: {
+          mode: 'item', profileId: 'private-gym', itemId: 'private-bar',
+          catalogEquipment: 'barbell', loadSemantics: 'total', implementCount: 1
+        }
+      }] }],
+      customEx: [{ id, n: 'Portable lift', bp: 'chest' }], week: {}
+    })
+    const exported = bundle.routines[0].ex[0].equipmentUse
+    expect(exported).toEqual({ mode: 'auto', catalogEquipment: 'barbell', loadSemantics: 'total' })
+    expect(JSON.stringify(bundle)).not.toContain('private-gym')
+    expect(JSON.stringify(bundle)).not.toContain('private-bar')
+
+    bundle.routines[0].ex[0].equipmentUse = {
+      ...exported, profileId: 'foreign-profile', itemId: 'foreign-item', implementCount: 2
+    }
+    bundle.routines[0].ex[0].equipmentUses = { 'foreign-profile': 'foreign-item' }
+    const parsed = parsePlan(bundle).routines[0].ex[0]
+    expect(parsed.equipmentUse).toEqual({
+      mode: 'auto', catalogEquipment: 'barbell', loadSemantics: 'total', implementCount: 2
+    })
+    expect(parsed).not.toHaveProperty('equipmentUses')
+    expect(JSON.stringify(parsed)).not.toContain('foreign-profile')
+    expect(JSON.stringify(parsed)).not.toContain('foreign-item')
+  })
+
   it('prints the Confirmed range when the strategy is inherited from the routine', () => {
     const id = EXDB.find(ex => ex.bp !== 'cardio' && ex.eq !== 'body weight').id
     const html = planPrintHTML({

@@ -8,7 +8,7 @@
 // Old workouts have neither field. They remain a read-only shared baseline for their exercise;
 // every newly-created workout snapshots both fields, so configurations can diverge safely from
 // that point onwards without rewriting history.
-import { isBodyweightEq, isCardio } from './exercises.js'
+import { exOr, isBodyweightEq, isCardio } from './exercises.js'
 import { isPureBodyweight } from './exercise-load-mode.js'
 
 export const LEGACY_PROGRESSION_PREFIX = 'exercise:'
@@ -162,6 +162,17 @@ export function progressionConfigSignature(config = {}, routine = {}, profile = 
   const policy = policyForSignature(config, routine, mode)
   const sets = positiveInt(config.sets, 1)
   const bodyweight = config.bodyweight == null ? isBodyweightEq(config.id) : !!config.bodyweight
+  const explicitEquipmentSemantics = ['total', 'per_implement', 'manual'].includes(config?.equipmentUse?.loadSemantics)
+    ? config.equipmentUse.loadSemantics
+    : null
+  // Before equipment profiles existed, dumbbell/kettlebell values already meant one implement
+  // in normal gym logging; other loaded values meant the total. Materializing that legacy
+  // meaning keeps an explicit matching selection on the same progression id, while an actual
+  // total <-> per-implement change still forks future history safely.
+  const catalogEquipment = exOr(config.id).eq
+  const equipmentLoadSemantics = mode !== 'cardio' && !isPureBodyweight(config)
+    ? explicitEquipmentSemantics || (['dumbbell', 'kettlebell'].includes(catalogEquipment) ? 'per_implement' : 'total')
+    : null
   const base = {
     v: 1,
     exerciseId: String(config.id || ''),
@@ -171,6 +182,7 @@ export function progressionConfigSignature(config = {}, routine = {}, profile = 
     bodyweight,
     side: mode === 'reps' && !!config.side
   }
+  if (equipmentLoadSemantics) base.equipmentLoadSemantics = equipmentLoadSemantics
 
   if (mode === 'cardio') {
     return JSON.stringify({ ...base, minutes: positiveInt(config.min, 20), speed: rounded(config.speed, 8) })

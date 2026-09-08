@@ -115,6 +115,15 @@ export default function Settings() {
       </Row>
     </Section>
 
+    {/* Equipment is a separate editor because profiles contain tools and inventories. */}
+    <Section title={t('Equipment')} footer={t('Loading suggestions use a frozen copy when a workout starts, so later changes are never retroactive.')}>
+      <Row icon="barbell" iconTint="var(--indigo)" title={t('Equipment profiles')}
+        subtitle={S.activeEquipmentProfileId
+          ? (S.equipmentProfiles || []).find(profile => profile.id === S.activeEquipmentProfileId)?.name || t('Active profile unavailable')
+          : t('No loading suggestions')}
+        accessory="chevron" onClick={() => nav('/settings/equipment')} />
+    </Section>
+
     {/* ---------- during a workout ---------- */}
     <Section title={t('During a workout')} footer={wakeOK ? t('The screen stays on while a workout is running, so you don’t have to unlock your phone between sets.') : null}>
       <SelectRow icon="timer" iconTint="var(--orange)" title={t('Rest timer')}

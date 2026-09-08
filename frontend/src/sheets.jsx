@@ -9,6 +9,7 @@ import { t, instrFor, getLang, INSTR_LANGS } from './lib/i18n.js'
 import { nav } from './lib/nav.js'
 import { starterRoutines } from './lib/starter.js'
 import Media, { Thumb } from './components/Media.jsx'
+import EquipmentGuide from './components/EquipmentGuide.jsx'
 import Stepper from './components/Stepper.jsx'
 import Icon from './components/Icon.jsx'
 import { Button, Slider, Switch, Segmented, SelectRow, Row } from './components/ui.jsx'
@@ -36,6 +37,13 @@ import {
 import { resetConfirmedRepRangeRest } from './lib/confirmedRepRangeRest.js'
 import { LOAD_MODE, hasAddedBodyweightLoad, isPureBodyweight, workoutEntryLoadMode } from './lib/exercise-load-mode.js'
 import { nativeWorkoutEnd, nativeWorkoutStart, workoutChronologyParts, workoutDurationTotal, workoutTimeDisplay } from './lib/workout-time.js'
+import {
+  calculateLoadingGuide,
+  defaultLoadSemantics,
+  normalizeEquipmentUse,
+  resolveEquipmentUse,
+  snapshotActiveEquipmentProfile
+} from './lib/equipment-load.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import {
   createRoutineExerciseId,
@@ -739,7 +747,7 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, add
   </>
 }
 
-function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
+function ExConfig({ ex, existing, onSave, onDelete, close, routine, equipmentContext }) {
   const st = useStore(s => s.S)
   const cardio = isCardio(ex.id)
   const initialConfig = (() => {
@@ -776,6 +784,85 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
   const confirmed = mode === 'reps' && activePolicy === 'confirmed_rep_range'
   const effectiveIncrement = loadIncrementFor({ ...c, id: ex.id }, st.unit)
   const addedLoadId = `added-load-${String(ex.id).replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const equipmentProfile = equipmentContext === undefined
+    ? snapshotActiveEquipmentProfile(st)
+    : equipmentContext
+  const equipmentApplicable = !cardio && (!bw || addedLoad)
+  const configuredEquipmentUse = normalizeEquipmentUse(c.equipmentUse)
+  const equipmentResolution = equipmentApplicable
+    ? resolveEquipmentUse({
+        profile: equipmentProfile,
+        config: { ...c, id: ex.id },
+        catalogEquipment: ex.eq
+      })
+    : { status: 'bodyweight' }
+  const resolvedEquipmentItem = equipmentResolution.status === 'resolved'
+    ? equipmentProfile?.items?.find(item => item.id === equipmentResolution.itemId)
+    : null
+  const equipmentSelection = configuredEquipmentUse.mode === 'none'
+    ? 'none'
+    : configuredEquipmentUse.mode === 'item' && configuredEquipmentUse.profileId === equipmentProfile?.id
+      ? `item:${configuredEquipmentUse.itemId}`
+      : 'auto'
+  const equipmentOptions = [
+    { value: 'auto', label: t('Automatic from exercise type'), subtitle: ex.eq ? t('Suggested type: {0}', t(ex.eq)) : t('This exercise has no catalog equipment type.') },
+    { value: 'none', label: t('No loading suggestion') },
+    ...(equipmentProfile?.items || []).map(item => ({
+      value: `item:${item.id}`,
+      label: item.label,
+      subtitle: item.catalogEquipment ? t('Matches {0}', t(item.catalogEquipment)) : t('Explicit selection only')
+    })),
+    ...(configuredEquipmentUse.mode === 'item'
+      && configuredEquipmentUse.profileId === equipmentProfile?.id
+      && !(equipmentProfile?.items || []).some(item => item.id === configuredEquipmentUse.itemId)
+      ? [{ value: `item:${configuredEquipmentUse.itemId}`, label: t('Selected tool is unavailable'), subtitle: t('Choose another tool before the next workout.') }]
+      : [])
+  ]
+  const chooseEquipment = value => setC(current => {
+    if (value === 'none') return { ...current, equipmentUse: { mode: 'none' } }
+    if (value === 'auto') {
+      const next = { ...current }
+      delete next.equipmentUse
+      return next
+    }
+    const itemId = value.replace(/^item:/, '')
+    const item = equipmentProfile?.items?.find(candidate => candidate.id === itemId)
+    if (!item) return current
+    return {
+      ...current,
+      equipmentUse: {
+        mode: 'item', profileId: equipmentProfile.id, itemId: item.id,
+        ...(item.catalogEquipment || ex.eq ? { catalogEquipment: item.catalogEquipment || ex.eq } : {}),
+        loadSemantics: defaultLoadSemantics(item.kind),
+        implementCount: current.equipmentUse?.implementCount || 1
+      }
+    }
+  })
+  const setImplementCount = implementCount => setC(current => ({
+    ...current,
+    equipmentUse: {
+      ...normalizeEquipmentUse(current.equipmentUse),
+      ...(equipmentResolution.catalogEquipment || ex.eq ? { catalogEquipment: equipmentResolution.catalogEquipment || ex.eq } : {}),
+      ...(equipmentResolution.loadSemantics ? { loadSemantics: equipmentResolution.loadSemantics } : {}),
+      implementCount: Math.max(1, Math.round(implementCount) || 1)
+    }
+  }))
+  const equipmentPreviewWeight = (() => {
+    if (!equipmentApplicable) return 0
+    if (confirmed) {
+      const preview = nextPrescription(st, { ...c, id: ex.id }, routine)
+      return Number(preview.weight ?? c.weight) || 0
+    }
+    return Number(c.weight) || 0
+  })()
+  const equipmentGuide = equipmentApplicable
+    ? calculateLoadingGuide({
+        profile: equipmentProfile,
+        equipmentUse: equipmentResolution,
+        targetWeight: equipmentPreviewWeight,
+        workoutUnit: equipmentProfile?.workoutUnit || st.unit
+      })
+    : null
   const removeAddedLoad = () => {
     setC(x => ({ ...x, weight: 0 }))
     setAddedLoadOpen(false)
@@ -798,6 +885,9 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     const sets = Math.max(1, Math.round(c.sets) || (cardio ? 1 : 3))
     const pureBodyweight = !cardio && isPureBodyweight({ ...c, id: ex.id })
     const savedWeight = pureBodyweight ? 0 : Math.max(0, c.weight || 0)
+    const equipment = !cardio && !pureBodyweight && c.equipmentUse
+      ? { equipmentUse: normalizeEquipmentUse(c.equipmentUse) }
+      : {}
     // Only carry progression settings that differ from the inherited default, so a plan file
     // stays readable and "follow the routine" keeps meaning exactly that.
     const prog = {}
@@ -827,7 +917,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     const flags = {}
     if (bw !== isBodyweightEq(ex.id)) flags.bodyweight = bw
     if (cardio) onSave({ sets, min: Math.max(1, Math.round(c.min) || 20), speed: Math.max(0, c.speed || 8) })
-    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: savedWeight, ...flags, ...prog })
+    else if (mode === 'time') onSave({ sets, mode: 'time', sec: Math.max(1, Math.round(c.sec) || 45), weight: savedWeight, ...flags, ...equipment, ...prog })
     else {
       // A unilateral target is stored even: the split has to divide, and a typed 15 would
       // otherwise plan seven reps on one side and eight on the other, every session.
@@ -835,7 +925,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
       // dormant and reappear unchanged if the user later switches back to another policy.
       const typed = Math.max(1, Math.round(c.reps) || 10)
       const reps = perSide ? Math.ceil(typed / 2) * 2 : typed
-      const out = { sets, mode: 'reps', reps, weight: savedWeight, ...flags, ...(perSide ? { side: true } : {}), ...prog }
+      const out = { sets, mode: 'reps', reps, weight: savedWeight, ...flags, ...(perSide ? { side: true } : {}), ...equipment, ...prog }
       if (policyFor({ ...c, id: ex.id }, routine, 'reps') === 'double') out.repsMin = Math.min(reps, Math.max(1, Math.round(c.repsMin) || Math.max(1, reps - 2)))
       // A ceiling below the working reps would tell you to add a set on day one.
       if (bw && !(out.weight > 0) && c.repsMax > 0) out.repsMax = Math.max(reps, Math.round(c.repsMax))
@@ -932,6 +1022,28 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
         ? t('Reps climb to {0}, then a set is added and the reps start over. At {1} sets it asks you to add weight instead.', c.repsMax, MAX_BW_SETS)
         : t('Reps climb by one whenever every set was clean. Set a ceiling to add sets instead of reps forever.')}
     </div>}
+    {equipmentApplicable && <fieldset className="cfg-group equipment-config-group">
+      <legend>{t('Loading equipment')}</legend>
+      <div className="sect-b">
+        <SelectRow icon="barbell" iconTint="var(--indigo)" title={t('Tool for this exercise')}
+          sheetTitle={t('Tool for this exercise')} value={equipmentSelection}
+          options={equipmentOptions} onChange={chooseEquipment} />
+        {equipmentResolution.status === 'resolved' && <Row icon="scale" iconTint="var(--teal)"
+          title={t('Logged weight means')}
+          value={equipmentResolution.loadSemantics === 'per_implement' ? t('one tool') : equipmentResolution.loadSemantics === 'manual' ? t('manual instruction') : t('total load')} />}
+      </div>
+      {equipmentResolution.status === 'resolved'
+        && ['loadable_dumbbell', 'fixed_weight'].includes(resolvedEquipmentItem?.kind)
+        && <div className="equipment-count-control">
+          <Stepper label={t('Number of tools used')} value={equipmentResolution.implementCount || 1}
+            step={1} decimal={false} onChange={setImplementCount} />
+          <p className="cfg-help">{t('For dumbbells, each set still logs the weight of one dumbbell.')}</p>
+        </div>}
+      {equipmentGuide?.status === 'no_load'
+        ? <p className="cfg-help">{t('Set a load above zero to preview the equipment composition.')}</p>
+        : <EquipmentGuide guide={equipmentGuide} preview />}
+      {!equipmentProfile && <p className="cfg-help">{t('Create and activate an equipment profile in Settings to enable loading suggestions.')}</p>}
+    </fieldset>}
     <ProgressionFields ex={ex} mode={mode} c={c} setC={setC} existing={existing} routine={routine}
       unit={st.unit} bw={bw} addedLoad={addedLoad} perSide={perSide} onRemoveAddedLoad={removeAddedLoad}
       onValidityChange={setProgressionValid} />
@@ -940,7 +1052,7 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine }) {
     {onDelete && <><div style={{ height: 8 }} /><Button variant="danger" onClick={() => { close(); onDelete() }}>{t('Remove from routine')}</Button></>}
   </>
 }
-export const exConfigSheet = (ex, existing, onSave, onDelete, routine) => ui().openSheet(close => <ExConfig ex={ex} existing={existing} onSave={onSave} onDelete={onDelete} routine={routine} close={close} />)
+export const exConfigSheet = (ex, existing, onSave, onDelete, routine, equipmentContext) => ui().openSheet(close => <ExConfig ex={ex} existing={existing} onSave={onSave} onDelete={onDelete} routine={routine} equipmentContext={equipmentContext} close={close} />)
 
 /* ============================ glyph picker ============================ */
 // Grouped by what the glyph means for a training day, so picking one is a scan
@@ -1173,12 +1285,17 @@ export function beginWorkout(routineId, bw) {
   const st = S()
   const r = routineId ? st.routines.find(x => x.id === routineId) : null
   const timing = nativeWorkoutStart()
+  const equipmentSnapshot = snapshotActiveEquipmentProfile(st)
   // The prescription is applied as the session is built, so you walk up to the bar with the
   // right weight already on the screen instead of being told about it afterwards. `plan` is
   // kept on the entry purely so the workout can explain the number it chose.
-  const entries = (r ? r.ex : []).map(cfg => buildScopedWorkoutEntry(st, cfg, r))
+  const entries = (r ? r.ex : []).map(cfg => buildScopedWorkoutEntry(st, cfg, r, equipmentSnapshot))
   update(s => {
-    s.active = { id: uid(), ...timing, routineId, name: r ? r.name : t('Freestyle'), bw: bw || null, cur: 0, entries }
+    s.active = {
+      id: uid(), ...timing, routineId, name: r ? r.name : t('Freestyle'), bw: bw || null,
+      cur: 0, entries,
+      ...(equipmentSnapshot ? { equipmentSnapshot } : {})
+    }
   })
   useUI.getState().stopRest()
   nav('/workout')
@@ -1305,6 +1422,7 @@ export function doFinishWorkout() {
     // finished workout cannot say whether it hit its reps, and a timed session reads back
     // as "0 reps". It is what the progression engine works from.
     entries: completedWorkoutEntries(A.entries),
+    ...(A.equipmentSnapshot ? { equipmentSnapshot: A.equipmentSnapshot } : {}),
     prs
   }
   w.vol = workoutVolume(w)

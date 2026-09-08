@@ -1,8 +1,10 @@
 // Hindi UI strings. Keys are the English source strings (see lib/i18n.js).
 import confirmedRepRangeFallback from '../lib/confirmedRepRangeLocaleFallback.js'
+import equipmentFallback from '../lib/equipmentLocaleFallback.js'
 
 export default {
   ...confirmedRepRangeFallback,
+  ...equipmentFallback,
   'Confirm': 'पुष्टि करें',
   'Cancel': 'रद्द करें',
   'Delete': 'हटाएँ',

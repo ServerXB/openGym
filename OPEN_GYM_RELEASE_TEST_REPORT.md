@@ -9,7 +9,7 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 
 ## 2. Ambiente di riferimento
 
-- Data ultimo aggiornamento: 2026-09-05
+- Data ultimo aggiornamento: 2026-09-08
 - Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
@@ -1068,7 +1068,453 @@ infrastruttura non disponibili in questa postazione.
 
 ---
 
-## 9. Stato delle release successive
+## 9. Release C — Requisito 7: profili attrezzatura e pesi da caricare
+
+### 9.1 Esito
+
+**SUPERATO — incluso nel commit dedicato del requisito 7.**
+
+Gate finale del 2026-09-08:
+
+```text
+Test mirati
+Test Files  10 passed (10)
+Tests       97 passed (97)
+Failed      0
+
+Regressione completa
+Test Files  33 passed (33)
+Tests       593 passed (593)
+Failed      0
+```
+
+La build di produzione è riuscita con 123 moduli trasformati. Le 11 lingue hanno 835 chiavi
+ciascuna e sono sincronizzate. Il controllo del diff è superato; gli avvisi LF/CRLF sono
+informativi e il warning Vite sulla dimensione dei chunk era già noto.
+
+È inoltre superato il controllo browser riproducibile in Edge headless a 320 px per elenco
+profili, editor e guida durante il workout, in tema scuro e chiaro.
+
+### 9.2 Modello e regole funzionali verificate
+
+Lo stato sincronizzabile contiene ora:
+
+```json
+{
+  "equipmentProfiles": [
+    {
+      "schemaVersion": 1,
+      "id": "equipment-profile:gym",
+      "name": "Palestra",
+      "unit": "kg",
+      "items": [
+        {
+          "id": "bar-main",
+          "kind": "symmetric_bar",
+          "label": "Bilanciere olimpico",
+          "catalogEquipment": "barbell",
+          "tareWeight": 20,
+          "sideCount": 2,
+          "denominations": [
+            { "weight": 20, "count": 2 },
+            { "weight": 5, "count": 2 }
+          ]
+        }
+      ]
+    }
+  ],
+  "activeEquipmentProfileId": "equipment-profile:gym"
+}
+```
+
+Sono state verificate queste regole:
+
+1. si possono creare profili separati per palestra, casa o viaggio e sceglierne uno per i
+   prossimi workout;
+2. ogni attrezzo ha identità locale, tipo, nome, associazione opzionale alla categoria del
+   catalogo, tara, lati e inventario con quantità;
+3. sono supportati bilanciere simmetrico, manubrio caricabile, manubrio/kettlebell fisso,
+   pacco pesi, macchina plate-loaded a uno o due lati e attrezzo con istruzione manuale;
+4. l'override esplicito dello slot ha precedenza sul mapping del catalogo;
+5. il mapping automatico avviene soltanto con una corrispondenza esatta e univoca; zero o più
+   corrispondenze producono un messaggio esplicito e nessun calcolo inventato;
+6. se un override viene eliminato dallo stesso profilo, non viene sostituito silenziosamente;
+7. dopo il cambio profilo è ammesso soltanto il nuovo matching univoco per categoria, perché gli
+   ID locali della palestra precedente non hanno significato nella nuova;
+8. per bilancieri e macchine il peso registrato è totale; per manubri e kettlebell è il peso di
+   un singolo attrezzo; gli attrezzi custom restano manuali;
+9. per i manubri `sets[].w` continua quindi a rappresentare un singolo manubrio. La quantità
+   usata è separata e può essere impostata a uno o più attrezzi senza moltiplicare il target;
+10. corpo libero puro e cardio non ricevono suggerimenti di carico; un corpo libero zavorrato
+    può invece associare l'attrezzatura alla zavorra;
+11. la selezione di un attrezzo locale, il suo ID, la tara e l'inventario non modificano il
+    `progressionId`; un cambio reale di significato `total`/`per_implement` separa invece la
+    progressione futura;
+12. i vecchi JSON senza i nuovi campi usano array vuoto e profilo nullo, senza migrazioni
+    manuali e senza cambiare workout o prescrizioni esistenti.
+
+### 9.3 Solver deterministico verificato
+
+Il calcolo usa centesimi interi e una ricerca bounded subset-sum, non una scelta greedy. Sono
+stati verificati:
+
+- soluzione esatta non greedy;
+- risultato indipendente dall'ordine nel quale è inserito l'inventario;
+- tie-break deterministico: meno piastre, poi preferenza stabile per quelle più pesanti;
+- quantità realmente disponibili e simmetria fra i due lati;
+- divisione dell'inventario fra due lati e fra il numero di manubri usati;
+- valori frazionari fino a 0,01 kg/lb;
+- combinazione inferiore e superiore più vicina quando il target non è componibile;
+- target uguale alla tara, target sotto tara e inventario insufficiente;
+- selezione diretta per manubri fissi, kettlebell e pacchi pesi;
+- macchine plate-loaded a uno o due lati;
+- nessuna conversione implicita fra profilo in kg e workout in lb;
+- nessuna formula inventata per attrezzatura custom o semantica incompatibile;
+- limite di complessità fail-safe: un inventario patologico restituisce un errore esplicito e
+  non una combinazione ottenuta da una ricerca parziale;
+- il target della progressione non viene mai corretto dal solver. Se non è caricabile, la UI
+  propone i vicini e lascia all'utente la scelta di cosa registrare.
+
+Caso nominale verificato:
+
+```text
+Target workout:       70 kg
+Bilanciere vuoto:     20 kg
+Residuo:              50 kg
+Carico per lato:      25 kg
+Messaggio:            bilanciere 20 kg + 20 kg + 5 kg per lato
+```
+
+È stato eseguito anche un confronto deterministico fra il solver di produzione e un enumeratore
+brute-force indipendente su 2.000 inventari piccoli generati con seed fisso. Per ogni caso sono
+stati confrontati soluzione esatta, valore inferiore più vicino e valore superiore più vicino.
+
+```powershell
+cd frontend
+node scripts/check-equipment-solver.mjs
+```
+
+```text
+2000 deterministic brute-force solver comparisons passed
+```
+
+### 9.4 UX/UI verificata
+
+Da `Impostazioni → Attrezzatura` sono disponibili:
+
+- elenco dei profili e indicazione di quello attivo;
+- creazione, attivazione ed eliminazione del profilo;
+- unità kg/lb separata per profilo;
+- editor di tipo, nome, match automatico, tara, lati, inventario/quantità e istruzione custom;
+- testi espliciti che distinguono modifiche future da snapshot attivi o terminati.
+
+Nella configurazione dell'esercizio sono disponibili:
+
+- tipo suggerito dal catalogo;
+- `Automatico`, `Nessun suggerimento` oppure attrezzo esplicito;
+- significato visibile del peso registrato;
+- quantità separata per manubri caricabili e pesi fissi;
+- anteprima costruita sul prossimo peso Confirmed quando la strategia è attiva.
+
+Durante il workout la guida è sopra le serie e segue la prossima serie non completata. Se il
+peso di quella serie viene modificato manualmente, il messaggio viene ricalcolato immediatamente;
+quando tutte le serie sono concluse scompare. Una composizione esatta usa il token semantico
+`success`, mentre casi impossibili, ambigui o incoerenti usano un warning distinto.
+
+Il significato non dipende dal colore: ogni box contiene icona, intestazione e testo, usa
+`role="status"` e `aria-live="polite"`. Il contrasto del testo success sul relativo sfondo è
+stato calcolato in sRGB:
+
+| Tema | Colore testo | Sfondo composito | Contrasto | Esito WCAG AA testo normale |
+|---|---|---|---:|---|
+| Scuro | `#30d158` | `#1f3526` | 6,51:1 | Superato |
+| Chiaro | `#137333` | `#e7f1eb` | 5,15:1 | Superato |
+
+I controlli di inventario usano una griglia responsive, label sopra i campi e target tattili da
+44 px. Sotto 360 px passano a una sola colonna per evitare label contratte con `…`.
+
+### 9.5 Snapshot, persistenza, sync e privacy
+
+All'avvio del workout viene acquisita una copia normalizzata del solo profilo attivo insieme
+all'unità globale usata dalla sessione:
+
+```json
+{
+  "active": {
+    "equipmentSnapshot": {
+      "schemaVersion": 1,
+      "id": "equipment-profile:gym",
+      "unit": "kg",
+      "workoutUnit": "kg",
+      "items": []
+    },
+    "entries": [
+      {
+        "equipmentUse": {
+          "status": "resolved",
+          "profileId": "equipment-profile:gym",
+          "itemId": "bar-main",
+          "loadSemantics": "total",
+          "implementCount": 1
+        }
+      }
+    ]
+  }
+}
+```
+
+Il lifecycle verificato è:
+
+```text
+configurazione futura
+        ↓ beginWorkout (una sola copia)
+active.equipmentSnapshot + entry.equipmentUse risolto
+        ↓ refresh / modifica profilo / esercizio aggiunto
+lo stesso snapshot resta autoritativo
+        ↓ finish
+workout.equipmentSnapshot + binding entry immutabili
+```
+
+In particolare:
+
+1. modificare tara, piastre o profilo dopo lo start non cambia il workout attivo;
+2. anche un esercizio aggiunto a metà sessione usa lo snapshot di avvio;
+3. se la sessione è iniziata senza profilo, attivarne uno dopo non lo introduce a metà workout;
+4. il workout terminato conserva snapshot e binding e può ricostruire la composizione originale;
+5. la sessione successiva usa invece la configurazione aggiornata;
+6. localStorage, backup JSON e mirror mobile mantengono i campi senza migrazione;
+7. `equipmentProfiles` da solo conta come dato utente e viene quindi sincronizzato;
+8. il server salva l'intero stato completato nel file utente/volume Docker. Come già previsto
+   dall'architettura, `state.active` viene rimosso dal `PUT /api/data`: un workout in corso resta
+   locale, mentre profili e workout terminati vengono sincronizzati;
+9. un piano esportato conserva soltanto categoria, semantica e quantità portabili. ID profilo,
+   ID attrezzo e inventario privato non escono dal dispositivo e vengono scartati anche da file
+   importati o manomessi.
+
+### 9.6 Test automatici mirati
+
+Comando eseguito:
+
+```powershell
+cd frontend
+npm.cmd test -- --run src/lib/equipment-load.test.js `
+  src/components/EquipmentGuide.test.jsx src/views/Equipment.test.jsx `
+  src/lib/workout-scope.test.js src/lib/workout-prescription.test.js `
+  src/lib/progression-scope.test.js src/lib/plan-share.test.js `
+  src/lib/state-storage.test.js src/store/useStore.test.js `
+  src/workout-lifecycle.integration.test.jsx
+```
+
+Risultato:
+
+```text
+Test Files  10 passed (10)
+Tests       97 passed (97)
+Failed      0
+```
+
+Le suite coprono normalizzazione, solver, tutti i tipi di attrezzo, singolo/doppio manubrio,
+risoluzione, errori espliciti, testo accessibile, schermate profilo, start/finish, refresh
+serializzato, esercizi aggiunti, JSON legacy, progressioni condivise/indipendenti, prescrizione,
+export/import e rilevamento dei dati sincronizzabili.
+
+È stato eseguito anche un audit dei literal i18n usati dalle nuove schermate: tutte le chiavi sono
+presenti nei dizionari. L'italiano ha traduzioni native; le altre lingue hanno un fallback inglese
+esplicito e quindi non mostrano la chiave mancante o `undefined`.
+
+### 9.7 Regressione, build, lingue e diff
+
+Comandi eseguiti:
+
+```powershell
+cd frontend
+npm.cmd test
+npm.cmd run build
+node scripts/check-locales.mjs
+cd ..
+git diff --check
+```
+
+Risultati:
+
+- regressione completa: **33 file, 593 test superati, 0 falliti**;
+- build Vite: **SUPERATA**, 123 moduli trasformati;
+- lingue: **11 su 11 sincronizzate**, 835 chiavi ciascuna;
+- confronto solver contro brute force: **2.000 casi superati, 0 divergenze**;
+- audit chiavi letterali della nuova UX: **SUPERATO**;
+- diff check: **SUPERATO**, con soli avvisi informativi LF/CRLF;
+- warning Vite sui chunk grandi: già noto e non bloccante.
+
+### 9.8 Controllo browser headless a 320 px
+
+È stato eseguito un controllo end-to-end leggero con l'app servita da Vite ed Edge headless
+reale. Il controllo usa un profilo browser temporaneo, prepara dati deterministici nello storage
+locale, naviga le schermate effettive e chiude Edge al termine.
+
+Comandi riproducibili su Windows, eseguiti in due terminali dalla radice del repository:
+
+```powershell
+cd frontend
+npm.cmd run dev -- --host 127.0.0.1 --port 4173
+```
+
+```powershell
+& 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe' `
+  --headless=new --disable-gpu --remote-debugging-port=9222 `
+  --user-data-dir='E:\Workspace\openGym\.edge-req7-audit' about:blank
+cd frontend
+node scripts/check-equipment-browser.mjs
+```
+
+Esito: **14 controlli superati, 0 falliti**.
+
+- elenco profili visibile e senza overflow orizzontale a 320 px;
+- editor del profilo visibile, senza overflow e con label leggibili;
+- apertura reale dell'editor del singolo attrezzo, senza overflow orizzontale;
+- valore del nome e label `Name`, `Empty equipment weight`, `Weight` e `Quantity` presenti per
+  esteso nell'editor (le chiavi italiane corrispondenti sono validate dall'audit locale);
+- guida workout esatta: target 70 kg, bilanciere da 20 kg, 20 kg + 5 kg per lato;
+- `role="status"` e `aria-live="polite"` presenti;
+- nessun overflow orizzontale nel workout;
+- colore success indipendente dal tema: `rgb(48, 209, 88)` scuro e
+  `rgb(19, 115, 51)` chiaro;
+- testo della guida ancora visibile dopo il cambio tema.
+
+Il profilo `.edge-req7-audit` è soltanto un artefatto temporaneo di test e può essere eliminato
+dopo l'esecuzione. Questo controllo non sostituisce screen reader, input tattile e collaudo sui
+dispositivi reali elencati nei gate manuali.
+
+### 9.9 Procedura manuale di replica
+
+Gli scenari A–K sono procedure di accettazione per browser/CasaOS reali. Non vengono presentati
+come E2E già eseguiti in questa postazione.
+
+#### Scenario A — bilanciere da 70 kg
+
+1. Aprire `Impostazioni → Attrezzatura` e creare il profilo `Palestra` in kg.
+2. Aggiungere `Bilanciere olimpico`, tipo bilanciere simmetrico, tara 20 kg, match `barbell`.
+3. Inserire almeno 2 piastre da 20 kg e 2 da 5 kg; attivare il profilo.
+4. Configurare una Bench Press da 70 kg lasciando `Automatico` oppure scegliendo il bilanciere.
+5. Avviare il workout.
+6. Deve comparire un box verde con target 70 kg e `20 kg + 5 kg per lato`.
+7. Il target delle serie deve restare 70 kg.
+
+#### Scenario B — target impossibile e inventario insufficiente
+
+1. Con lo stesso bilanciere impostare una prossima serie da 63,75 kg.
+2. Verificare il warning `Non caricabile esattamente`, con alternativa inferiore e superiore.
+3. Eliminare una delle due piastre necessarie dal profilo e avviare una nuova sessione.
+4. Verificare che la simmetria venga rispettata e che non siano suggerite piastre inesistenti.
+5. Inserire un target inferiore alla tara: deve comparire un errore esplicito.
+6. In tutti i casi il target workout non deve cambiare automaticamente.
+
+#### Scenario C — singolo manubrio e coppia
+
+1. Creare un manubrio caricabile con manico 2 kg e quantità reali di piastre.
+2. Associarlo a un esercizio e lasciare `Numero di attrezzi usati = 1`.
+3. Con target 20 kg, verificare che il testo parli di un singolo manubrio da 20 kg.
+4. Portare la quantità a 2: il target deve rimanere 20 kg per manubrio, mentre l'inventario
+   richiesto deve raddoppiare.
+5. Se le piastre non bastano per due manubri, deve comparire il warning senza moltiplicare o
+   riscrivere il peso registrato.
+
+#### Scenario D — cambio palestra non retroattivo
+
+1. Attivare un profilo con bilanciere da 20 kg e avviare un workout da 70 kg.
+2. Senza terminare, modificare il bilanciere corrente a 15 kg oppure attivare un altro profilo.
+3. Tornare al workout: il messaggio deve continuare a usare la tara da 20 kg.
+4. Fare refresh e verificare di nuovo la tara da 20 kg.
+5. Terminare il workout e controllare nel backup che lo snapshot storico contenga 20 kg.
+6. Avviare una nuova sessione: deve usare 15 kg o il nuovo profilo.
+
+#### Scenario E — esercizio aggiunto durante la sessione
+
+1. Avviare un workout con un profilo attivo.
+2. Modificare il profilo in un'altra scheda o prima di tornare all'active workout.
+3. Usare `Aggiungi esercizio` nel workout già attivo.
+4. La configurazione e la guida devono usare attrezzi e inventario congelati allo start.
+5. Ripetere partendo senza profilo e attivandolo dopo: l'active workout non deve adottarlo.
+
+#### Scenario F — unità discordanti
+
+1. Impostare il profilo attrezzatura in kg e l'account/workout in lb.
+2. Avviare un workout caricato.
+3. Deve comparire `Nessun suggerimento` con entrambe le unità e l'indicazione che non viene
+   effettuata alcuna conversione automatica.
+4. Non deve comparire una composizione numerica ottenuta reinterpretando kg come lb.
+
+#### Scenario G — corpo libero, cardio e disattivazione per slot
+
+1. Aprire un esercizio a corpo libero puro: la sezione attrezzatura e il peso non devono apparire.
+2. Aggiungere una zavorra: la sezione attrezzatura deve diventare disponibile.
+3. Aprire un esercizio cardio: non deve comparire alcun calcolo piastre.
+4. Su un esercizio caricato scegliere `Nessun suggerimento`, salvare e avviare il workout: il
+   peso resta registrabile, ma il box di composizione non deve apparire.
+
+#### Scenario H — stesso esercizio in routine diverse
+
+1. Inserire lo stesso esercizio con configurazione equivalente in due routine e verificare che
+   la progressione resti condivisa.
+2. Selezionare due bilancieri locali diversi ma con la stessa semantica totale: la progressione
+   deve rimanere condivisa.
+3. Cambiare realmente la semantica del peso in una delle due configurazioni: la UI deve indicare
+   la separazione futura del gruppo.
+4. Workout e snapshot già terminati non devono cambiare.
+
+#### Scenario I — backup, sync e CasaOS
+
+1. Prima del deploy scaricare un backup JSON e conservarne una copia.
+2. Dopo il deploy creare profilo/attrezzo, terminare un workout e scaricare un nuovo backup.
+3. Verificare nel JSON `equipmentProfiles`, `activeEquipmentProfileId`,
+   `workout.equipmentSnapshot` ed `entry.equipmentUse`.
+4. Eseguire refresh e logout/login; poi aprire lo stesso utente in un secondo browser.
+5. Profili e workout terminato devono ricomparire. L'active workout non è atteso sul secondo
+   browser perché resta intenzionalmente device-local.
+6. Eseguire `docker compose down` e `docker compose up -d` senza `-v`.
+7. Verificare nuovamente profili/snapshot e confrontare il backup; nessun workout precedente deve
+   essere riscritto.
+
+#### Scenario J — privacy del piano condiviso
+
+1. Esportare una routine che usa un attrezzo esplicito.
+2. Aprire il file del piano come testo.
+3. Deve contenere al massimo categoria, semantica e quantità; non deve contenere ID del profilo,
+   ID dell'attrezzo, tara o inventario.
+4. Importarlo in un profilo differente: deve usare il matching locale univoco oppure mostrare un
+   errore esplicito, senza riferimenti alla palestra del mittente.
+
+#### Scenario K — responsive e accessibilità
+
+1. Ripetere editor profilo, configurazione esercizio e workout a 320/360/390/430/640 px e con
+   reflow/zoom 200%.
+2. Verificare che label e valori vadano a capo senza ellissi o sovrapposizioni.
+3. Navigare con tastiera e screen reader: selettori, switch e pulsanti elimina devono avere un
+   nome; il box carico deve essere annunciato come stato.
+4. Provare tema chiaro/scuro e tutti gli accenti: il verde success deve restare semantico e non
+   seguire il colore scelto dall'utente.
+5. Coprire il colore o usare modalità monocromatica: icona e testo devono continuare a distinguere
+   successo, warning e istruzione manuale.
+
+### 9.10 Gate manuali ancora necessari sull'ambiente reale
+
+Non eseguiti in questa postazione:
+
+- test visuale e interattivo umano a 360/390/430/640 px e zoom/reflow 200%; il controllo
+  automatico in Edge headless a 320 px è stato eseguito con esito positivo;
+- screen reader e tastiera reali, oltre alla struttura semantica coperta automaticamente;
+- refresh/restart di un active workout in browser reale;
+- sincronizzazione autenticata fra due browser;
+- Docker/CasaOS down/up con il volume dati reale;
+- mirror/WebView mobile e dispositivo fisico;
+- verifica con l'inventario reale dell'utente in palestra.
+
+I gate automatici sono verdi. Questi controlli restano separati perché dipendono da browser,
+account, volume Docker e hardware non disponibili nella sessione di test; non vengono dichiarati
+come superati senza evidenza.
+
+---
+
+## 10. Stato delle release successive
 
 | Release | Requisiti | Stato |
 |---|---|---|
@@ -1078,7 +1524,7 @@ infrastruttura non disponibili in questa postazione.
 | B | 5 — auto-riduzione predefinita per nuove selezioni Confirmed | Implementato, validato e incluso nel commit dedicato |
 | B | 12 — data e ora start/end | Implementato, validato e incluso nel commit dedicato |
 | B | 2A, 4, 10 | Non iniziata |
-| C | 7 | Non iniziata |
+| C | 7 | Implementato, validato e incluso nel commit dedicato |
 | D | 3, 2B, 2C | Non iniziata |
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |
 

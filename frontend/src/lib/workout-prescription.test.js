@@ -27,6 +27,15 @@ describe('workout prescription target snapshot', () => {
       .toEqual({ id: 'squat', reps: 5, weight: 72.5, inc: 2 })
   })
 
+  it('keeps local equipment bindings outside the prescription snapshot', () => {
+    const target = targetForPrescription({
+      id: 'squat', sets: 3, reps: 5, weight: 100,
+      equipmentUse: { mode: 'item', profileId: 'gym', itemId: 'bar', loadSemantics: 'total' }
+    }, { policy: 'linear', weight: 102 })
+    expect(target).toMatchObject({ id: 'squat', sets: 3, reps: 5, weight: 102 })
+    expect(target).not.toHaveProperty('equipmentUse')
+  })
+
   it('snapshots timed prescription fields without mistaking the duration step for a load rule', () => {
     expect(targetForPrescription(
       { id: 'plank', mode: 'time', sets: 3, sec: 45, weight: 10 },

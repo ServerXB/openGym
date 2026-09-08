@@ -47,6 +47,11 @@
   --on-acc:#000000;
   --acc-soft: color-mix(in srgb, var(--acc) 16%, transparent);
   --acc-line: color-mix(in srgb, var(--acc) 38%, transparent);
+  /* Semantic success is independent from the customizable accent. */
+  --success:#30d158;
+  --success-soft:color-mix(in srgb,var(--success) 14%,transparent);
+  --warning:#ffb340;
+  --warning-soft:color-mix(in srgb,var(--warning) 12%,transparent);
 
   /* geometry */
   --r-sm:8px; --r:12px; --r-lg:16px; --r-xl:22px; --r-card:14px;
@@ -81,6 +86,11 @@
   --purple:#af52de; --mint:#00c7be; --brown:#a2845e; --grey:#8e8e93;
   --acc-2:#248a3d;
   --on-acc:#ffffff;
+  /* #137333 remains readable as small text on white (WCAG AA). */
+  --success:#137333;
+  --success-soft:color-mix(in srgb,var(--success) 10%,transparent);
+  --warning:#8a4b00;
+  --warning-soft:color-mix(in srgb,var(--warning) 9%,transparent);
 }
 
 /* accents — Apple's system colours, so a recolour never looks off-system */
@@ -604,6 +614,23 @@ h4.sec{
 .progline.warn{color:var(--yellow)}
 .progline svg{flex:none;margin-top:2px}
 
+/* Exact equipment instructions are operational success, not brand decoration. Warnings carry
+   the same icon/text structure, so the message remains understandable without colour. */
+.equipment-guide{
+  display:flex;align-items:flex-start;gap:9px;margin:9px 0 3px;padding:10px 12px;
+  border-radius:10px;background:var(--surface);font-size:13px;line-height:1.38;
+  color:var(--label);overflow-wrap:anywhere;
+}
+.equipment-guide>.icn{font-size:17px;margin-top:1px;flex:none}
+.equipment-guide>div{display:flex;min-width:0;flex-direction:column;gap:2px}
+.equipment-guide strong{font-size:13px;font-weight:600;color:inherit}
+.equipment-guide span{color:inherit}
+.equipment-guide small{font-size:12px;line-height:1.35;color:inherit}
+.equipment-guide.success{background:var(--success-soft);color:var(--success)}
+.equipment-guide.warning{background:var(--warning-soft);color:var(--warning)}
+.equipment-guide.manual{background:var(--surface-2);color:var(--label)}
+.equipment-guide.preview{margin:10px 0 14px}
+
 /* start a timed set (issue #16) — sits where you'd otherwise reach for the checkbox */
 .setrow .setgo{
   width:30px;height:30px;border-radius:50%;flex:none;
@@ -677,6 +704,30 @@ h4.sec{
 .cfg-next-preview strong{font-size:18px;line-height:1.25;overflow-wrap:anywhere}
 .cfg-next-preview>span:last-child{align-self:center;font-size:13px;color:var(--label-2);text-align:right}
 
+/* Equipment/profile editors: labels sit above full-width controls and inventory gets a real
+   grid. This avoids the contracted ellipses that motivated the configuration UX work. */
+.equipment-field{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;min-width:0}
+.equipment-field>label,.equipment-label,.equipment-subhead{
+  font-size:13px;line-height:1.35;color:var(--label-2);padding:0 2px;
+}
+.equipment-picker-group{margin-bottom:8px}
+.equipment-kind-help{margin:0 2px 16px}
+.equipment-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px}
+.equipment-grid>*{min-width:0}
+.equipment-inventory{margin:2px 0 18px;padding:14px;border:var(--hair) solid var(--sep);border-radius:var(--r-card)}
+.equipment-inventory .cfg-help{margin:4px 0 12px}
+.equipment-inventory-row{
+  display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 44px;
+  gap:9px;align-items:end;padding:10px 0;border-top:var(--hair) solid var(--sep);
+}
+.equipment-inventory-row .stp-w{min-width:0}
+.equipment-inventory-row .stp button{width:38px;height:44px}
+.equipment-inventory-row .equipment-remove{width:44px;height:44px;color:var(--red)}
+.equipment-name-row .field{width:min(58%,260px);padding:9px 11px;background:var(--surface-2)}
+.equipment-config-group{margin:0 0 18px}
+.equipment-count-control{margin-top:12px}
+.equipment-count-control .stp-w{max-width:260px}
+
 @media (max-width:359px){
   .cfgrow,.cfg-grid,.cfg-recovery-status dl{grid-template-columns:minmax(0,1fr)}
   .cfg-preset-buttons{grid-template-columns:minmax(0,1fr)}
@@ -685,6 +736,12 @@ h4.sec{
   .cfg-next-preview{grid-template-columns:minmax(0,1fr)}
   .cfg-next-preview>span:first-child{grid-column:auto}
   .cfg-next-preview>span:last-child{text-align:left}
+  .equipment-grid{grid-template-columns:minmax(0,1fr)}
+  .equipment-inventory-row{grid-template-columns:minmax(0,1fr) 44px}
+  .equipment-inventory-row .stp-w:nth-child(2){grid-column:1/2}
+  .equipment-inventory-row .equipment-remove{grid-column:2;grid-row:1/3;align-self:center}
+  .equipment-name-row{align-items:flex-start;flex-direction:column}
+  .equipment-name-row .field{width:100%}
 }
 
 /* --- rest timer --- */

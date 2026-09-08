@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { exOr } from '../lib/exercises.js'
-import { effectiveRoutine, lastEntryFor, bestWeightFor, buildSets, supersetUnits, unitOf, setLabel, modeOf, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
+import { effectiveRoutine, lastEntryFor, bestWeightFor, supersetUnits, unitOf, setLabel, modeOf, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
 import { fmtLoad, fmtNum, fmtDate, todayISO, uid, exCount, DAYN } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { t } from '../lib/i18n.js'
@@ -11,14 +11,16 @@ import { api } from '../lib/api.js'
 import Media from '../components/Media.jsx'
 import { startFlow, exercisePicker, exConfigSheet, exerciseDetailSheet, topWeightSheet, finishWorkout, workoutCompleteSheet, confirmSheet, discardActiveWorkout } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
+import EquipmentGuide from '../components/EquipmentGuide.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
-import { nextPrescription, applyPrescription } from '../lib/progression.js'
 import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
-import { loadIncrementForPrescription, targetForPrescription } from '../lib/workout-prescription.js'
+import { loadIncrementForPrescription } from '../lib/workout-prescription.js'
 import { progressionScopeSnapshot } from '../lib/progression-scope.js'
 import { LOAD_MODE, workoutEntryLoadMode } from '../lib/exercise-load-mode.js'
 import { applySetCountFromNextWorkout, entrySetStatus, futureSetCountPresentation, invalidateEntryReview, isOptionalSet, prescribedSetCount, unitPrescribedComplete, workoutSetStatus } from '../lib/workout-set-status.js'
+import { appendScopedWorkoutEntry } from '../lib/workout-scope.js'
+import { equipmentGuideForEntry } from '../lib/equipment-load.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -74,6 +76,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   // What the progression policy decided for this session, and why (issue #17). Computed when
   // the session was built so the reason matches the numbers already in the rows.
   const plan = entry.plan
+  const equipmentGuide = equipmentGuideForEntry(entry, S.active.equipmentSnapshot)
   // A bodyweight set has no weight to type, so the column is not there (issue #32) — one
   // stepper instead of two, which is the whole point of the flag. Adding a belt weight in the
   // config brings it back, now labelled as the addition it is.
@@ -141,6 +144,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
       {ex.eq && <span className="tag">{t(ex.eq)}</span>}
       {best > 0 && <span className="tag nocap">{t('Best:')} {fmtLoad(best)} {S.unit}</span>}
     </div>
+    <EquipmentGuide guide={equipmentGuide} />
     {last && <div className="small dim" style={{ marginBottom: 4 }}>{t('Last time')} ({fmtDate(last.d)}): {last.sets.map(s => setLabel(entry.id, s, last.target)).join(', ')}</div>}
     {plan && plan.why && plan.kind !== 'off' && <div className={'progline' + (plan.kind === 'deload' ? ' warn' : '')}>
       <Icon name={plan.kind === 'up' ? 'arrowUp' : plan.kind === 'deload' ? 'arrowDown' : 'lightbulb'} />
@@ -360,19 +364,10 @@ function ActiveWorkout() {
     <div style={{ height: 10 }} />
     <Button onClick={() => exercisePicker(ex => exConfigSheet(ex, null, cfg => update(s => {
       const full = { ...cfg, id: ex.id }
-      const scope = progressionScopeSnapshot(full)
-      const scoped = { ...full, ...scope }
-      const plan = nextPrescription(s, scoped, s.routines.find(r => r.id === s.active.routineId))
-      const target = targetForPrescription(scoped, plan)
-      s.active.entries.push({
-        id: ex.id,
-        ...scope,
-        target,
-        plan,
-        sets: applyPrescription(buildSets(s, scoped), plan)
-      })
-      s.active.cur = s.active.entries.length - 1
-    }), null, S.routines.find(r => r.id === A.routineId)))} icon="plus">{t('Add exercise')}</Button>
+      const scoped = { ...full, ...progressionScopeSnapshot(full) }
+      const routine = s.routines.find(r => r.id === s.active.routineId)
+      appendScopedWorkoutEntry(s, scoped, routine)
+    }), null, S.routines.find(r => r.id === A.routineId), A.equipmentSnapshot || null))} icon="plus">{t('Add exercise')}</Button>
     <div style={{ height: 10 }} />
     {(() => {
       const exDone = status.exercisesComplete
