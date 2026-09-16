@@ -1529,3 +1529,225 @@ come superati senza evidenza.
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |
 
 Ogni riga verrà aggiornata dopo test automatici, regressione completa e commit dedicato.
+
+---
+
+## 11. Verifica incidente: massimo registrato e conferme tra routine
+
+Data verifica: **2026-09-16**
+
+Stato: **analisi conclusa, correzione pronta, test superati, commit non ancora creato**
+
+### 11.1 Evidenza analizzata
+
+L'analisi è partita dalle due schermate presenti nella cartella `bug/`:
+
+- `galleryContent8808946448639486412.jpg`: Dumbbell Seated Shoulder Press, ultima sessione
+  `19×12, 19×12, 19×12`, nuova prescrizione `19×12`, messaggio `Conferma al massimo: 1 / 2`;
+- `galleryContent5061745906332079591.jpg`: Dumbbell Lateral Raise, ultima sessione
+  `8×15` per quattro serie, nuova prescrizione `8×15`, stesso messaggio `1 / 2`.
+
+È stato poi analizzato in sola lettura anche il backup completo
+`state-RuyIVpkH8ixov1pP.json`:
+
+- dimensione: `307073` byte;
+- SHA-256: `76887E227B271E1EAA92742AFD6ED66F170EDF8502D6D179B9FDE311566BD429`;
+- contenuto utile all'audit: 6 routine, 20 workout e 34 slot esercizio;
+- il file è rimasto immutato e la cartella `bug/` resta esclusa dalla modifica da committare.
+
+Le schermate non mostrano una sessione ignorata. Nel reducer Confirmed il messaggio `1 / 2`
+può essere prodotto soltanto quando l'ultima sessione selezionata nello stesso gruppo ha esito
+`top_range_success`. Inoltre la riga `L'ultima volta` e il piano Confirmed interrogano entrambi lo
+storico tramite lo stesso `progressionId`: la sessione del 27 agosto visibile nelle schermate è
+quindi proprio la prima conferma già conteggiata.
+
+Il comportamento di dominio resta quello approvato:
+
+1. primo massimo consecutivo: stesso peso, target al massimo, conferma `1 / 2`;
+2. secondo massimo consecutivo con stesso gruppo, range e carico uniforme: incremento del peso e
+   ritorno alle ripetizioni minime;
+3. una sessione fallita, incompleta, non al massimo, con carico misto o appartenente a un altro
+   gruppo interrompe/non completa la sequenza.
+
+### 11.2 Risultato del replay sul backup reale
+
+La cronologia completa elimina il dubbio lasciato dalle sole immagini. Per entrambi gli esercizi
+la prima conferma è stata registrata il 27 agosto, la seconda il 3 settembre e l'aumento è stato
+applicato il 10 settembre:
+
+| Data | Shoulder Press (`0405`) | Lateral Raise (`0334`) | Effetto |
+|---|---|---|---|
+| 27 agosto | `19 kg × 12 × 3` | `8 kg × 15 × 4` | primo massimo valido, streak `1 / 2` |
+| 3 settembre | `19 kg × 12 × 3` | `8 kg × 15 × 4` | secondo massimo valido |
+| 10 settembre | prescrizione `20 kg × 10 × 3` | prescrizione `9 kg × 13 × 4` | incremento configurato e ritorno al minimo |
+
+Il messaggio mostrato nella schermata era quindi corretto: le 12 o 15 ripetizioni erano state
+riconosciute come **prima** conferma, non ignorate. La successiva cronologia dimostra anche che la
+seconda conferma ha prodotto esattamente l'aumento atteso.
+
+Il recupero a 120 secondi dello Shoulder Press non è stato aumentato dalla sessione al massimo.
+Nel backup è presente un reset manuale legacy a 120 secondi, registrato il 24 agosto alle
+10:24:52 locali (`restEpochId=mt6z088eweazd`); lo snapshot del 27 agosto dichiara infatti
+`restSource=manual_reset`. Il timer era già a 120 secondi prima di quel workout.
+
+Per il Lateral Raise di PUSH 2, il primo snapshot legacy conserva invece 90 secondi pur avendo
+una base di 60. È un residuo del vecchio comportamento globale per ID esercizio, precedente al
+rilascio degli scope: il workout del 27 agosto è ancora senza `progressionId`, mentre dal 3
+settembre gli snapshot sono correttamente scoped. Lo storico non viene riscritto; i nuovi workout
+non possono più contaminare l'omonimo esercizio di PUSH 1.
+
+Il replay con il codice corrente produce oggi per PUSH 2:
+
+- Shoulder Press: prossima prescrizione `20 kg × 11`, recupero 120 secondi, riduzione automatica
+  a `3 / 4` successi;
+- Lateral Raise: prossima prescrizione `9 kg × 14`, recupero 90 secondi, riduzione automatica a
+  `3 / 4` successi.
+
+Con un altro successo valido, il piano seguente ridurrà il rispettivo recupero di 30 secondi,
+senza scendere sotto la base configurata.
+
+### 11.3 Audit del possibile conflitto tra esercizi uguali
+
+Sono stati controllati:
+
+- creazione e normalizzazione di `routineExerciseId` e `progressionId`;
+- snapshot degli ID all'avvio e al termine del workout;
+- lookup dell'ultima entry e delle sessioni Confirmed;
+- condivisione fra configurazioni equivalenti in routine diverse;
+- isolamento di configurazioni materialmente diverse e duplicati nella stessa routine;
+- range congelato, `setBaselineId`, modalità di carico e uniformità del peso;
+- salvataggio locale, pull server e ordine di append dei workout.
+
+Nel backup non risultano ID di routine, slot o workout duplicati; non risultano slot senza
+`routineExerciseId`, `progressionId` o firma persistita, né gruppi attuali con firme
+incompatibili. Le configurazioni omonime di PUSH 1 e PUSH 2 sono intenzionalmente indipendenti:
+
+- Shoulder Press: PUSH 1 usa `4 × 8–10`, 24 kg, recupero base 120 e strategia manuale; PUSH 2 usa
+  `3 × 10–12`, 19 kg, recupero base 90 e riduzione automatica;
+- Lateral Raise: PUSH 1 usa `4 × 10–12`, 12 kg, incremento 2 e base 90; PUSH 2 usa
+  `4 × 13–15`, 8 kg, incremento 1 e base 60.
+
+Poiché serie, range, carichi e recuperi sono materialmente diversi, combinarne lo storico sarebbe
+un errore. Gli ID distinti presenti nel backup impediscono proprio questa combinazione.
+
+Il test d'integrazione ora verifica esplicitamente questa sequenza tra due routine equivalenti:
+
+```text
+Routine A: target 8, risultato 10/10/10 -> Routine B vede 70 kg × 10 e prima conferma registrata
+Routine B: target 9, risultato 10/10/10 -> Routine A vede 72 kg × 8 e streak azzerato
+```
+
+Non è emersa contaminazione o perdita fra routine compatibili. È stato inoltre generato il piano
+con il codice corrente per tutti i 34 slot del backup: ogni prescrizione è stata risolta con ID e
+numero di serie coerenti, senza mutare la cronologia.
+
+La normalizzazione del backup con il codice corrente produce 33 aggiornamenti tecnici, tutti e
+soli dentro `progressionSignature`: 31 firme materializzano `equipmentLoadSemantics`, mentre due
+esercizi a corpo libero canonicalizzano l'incremento da `default` a `not_applicable`. Un diff
+ricorsivo conferma zero modifiche fuori dalle firme: restano identici tutti i 34 `progressionId`
+e `routineExerciseId`, le 31 `progressionWeights`, i 20 workout, i due controlli di progressione,
+lo stato attivo e ogni altro dato funzionale. Una seconda normalizzazione è idempotente.
+
+### 11.4 Correzione applicata
+
+Il difetto confermato era di comprensibilità: `Conferma al massimo: 1 / 2` non dichiarava che il
+massimo precedente fosse già stato acquisito e poteva sembrare un mancato riconoscimento.
+
+Per un esercizio caricato il nuovo messaggio italiano è:
+
+```text
+Massimo raggiunto nell'ultimo allenamento: prima conferma registrata (1 / 2).
+Ripetilo un'altra volta con lo stesso peso per aumentare il carico.
+```
+
+Per il lavoro senza carico viene usata una variante che parla di completare il passo di
+progressione e non promette un aumento di peso. La modifica riguarda soltanto la spiegazione del
+piano futuro: algoritmo, workout completati, target, peso, streak, recupero e formato JSON non
+vengono modificati.
+
+### 11.5 Test automatici e no-regression
+
+Test mirati finali:
+
+```powershell
+cd frontend
+npm.cmd test -- progression.test.js progression-scope.integration.test.js `
+  confirmedRepRangeCopy.test.js --run
+```
+
+Esito:
+
+```text
+Test Files  4 passed (4)
+Tests       195 passed (195)
+Failed      0
+```
+
+Il pattern `progression.test.js` include anche la suite di scope omonima; per questo il riepilogo
+riporta quattro file. La copertura aggiunta verifica:
+
+- prima conferma a carico esterno con peso invariato e spiegazione esplicita;
+- testo distinto per progressione senza carico;
+- prima conferma trasferita da routine A a routine B quando le configurazioni sono equivalenti;
+- seconda conferma in B, incremento esatto e reset al minimo quando si torna in A;
+- copia italiana e fallback inglese.
+
+Sul backup reale sono stati eseguiti anche tre test di audit temporanei, rimossi dopo l'uso per non
+versionare dati personali:
+
+- replay completo della progressione per i quattro scope omonimi interessati: superato;
+- costruzione della prossima prescrizione e della relativa entry per tutti i 34 slot: superata;
+- confronto ricorsivo prima/dopo normalizzazione e secondo passaggio idempotente: superato, con le
+  sole 33 canonicalizzazioni di firma descritte sopra.
+
+Regressione completa:
+
+```powershell
+cd frontend
+npm.cmd test -- --run
+```
+
+```text
+Test Files  34 passed (34)
+Tests       595 passed (595)
+Failed      0
+```
+
+Gate ulteriori:
+
+- build Vite: **SUPERATA**, 123 moduli trasformati;
+- Vite segnala il limite dimensionale di alcuni chunk già generati, avviso non bloccante e non
+  collegato alla logica Confirmed Rep-Range;
+- locale check: **SUPERATO**, 11 lingue con 836 chiavi ciascuna;
+- `git diff --check`: **SUPERATO**, soli avvisi informativi LF/CRLF;
+- cartella `bug/`: lasciata intatta e non inclusa nella modifica.
+
+### 11.6 Anomalie separate rilevate nel backup
+
+Tre workout presentano durate anomale:
+
+- 3 settembre, PUSH 2: 23,56 ore;
+- 5 settembre, LEGS / CORE: 9,24 ore;
+- 12 settembre, LEGS / CORE: 39,82 ore, con chiusura il 14 settembre.
+
+Questi record non falsano il conteggio delle conferme Confirmed Rep-Range, ma possono alterare le
+statistiche di durata. Non contengono inoltre i nuovi campi di provenienza/precisione temporale.
+Il dato è compatibile sia con sessioni lasciate aperte sia con un client CasaOS non ancora
+aggiornato alla gestione timestamp: senza sapere come sono state chiuse non è corretto riscriverle
+o attribuire automaticamente la causa. Va aperto un incidente separato se l'utente conferma di
+averle terminate normalmente.
+
+### 11.7 Replica manuale
+
+1. Configurare lo stesso esercizio Confirmed in due routine con gli stessi valori materiali:
+   serie, minimo/massimo, peso, incremento, recupero, modalità e strategia di riduzione.
+2. Nell'editor verificare `Progressione condivisa` e il nome dell'altra routine.
+3. Avviare la routine A, completare tutte le serie al massimo del range con peso uniforme e
+   terminare il workout.
+4. Avviare la routine B: il peso deve essere invariato e il messaggio deve dichiarare
+   `prima conferma registrata (1 / 2)` e chiedere di ripetere lo stesso carico.
+5. Completare di nuovo tutte le serie al massimo e terminare.
+6. Avviare A o B: il peso deve aumentare dell'incremento configurato e il target deve tornare al
+   minimo del range.
+7. Ripetere con due configurazioni materialmente diverse: l'editor deve indicare
+   `Progressione indipendente` e le conferme non devono essere combinate.

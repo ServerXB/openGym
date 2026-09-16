@@ -672,7 +672,13 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
 
   if (streak < 2) {
     const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
-    return { ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps, ...carriedSets, ...restPlan, topRangeStreak: 1, why: ['Top range confirmation: 1 / 2'] }
+    const confirmationWhy = effectiveWeight > 0
+      ? ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
+      : ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more to complete the progression step.']
+    return {
+      ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps,
+      ...carriedSets, ...restPlan, topRangeStreak: 1, why: confirmationWhy
+    }
   }
   const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
   // With no external load there is no plate to add. Complete the same two-confirmation cycle,

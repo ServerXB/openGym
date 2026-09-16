@@ -572,7 +572,12 @@ describe('Confirmed Rep-Range progression', () => {
 
   it('holds weight and records the first top-range confirmation', () => {
     const p = confirmedRepRangeProgression(state([{ target: 12, reps: [12, 12, 12] }]), cfg)
-    expect(p).toMatchObject({ weight: 70, reps: 12, topRangeStreak: 1 })
+    expect(p).toMatchObject({
+      weight: 70,
+      reps: 12,
+      topRangeStreak: 1,
+      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
+    })
   })
 
   it('increases weight and resets target and streak after the second consecutive confirmation', () => {
@@ -994,7 +999,11 @@ describe('Confirmed Rep-Range progression', () => {
     const historyBefore = JSON.stringify(S.workouts)
 
     expect(confirmedRepRangeProgression(S, bodyweight)).toMatchObject({
-      kind: 'hold', weight: 0, reps: 12, topRangeStreak: 1
+      kind: 'hold',
+      weight: 0,
+      reps: 12,
+      topRangeStreak: 1,
+      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more to complete the progression step.']
     })
     expect(JSON.stringify(S.workouts)).toBe(historyBefore)
   })

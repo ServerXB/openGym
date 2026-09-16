@@ -138,7 +138,17 @@ describe('progression scopes across the workout lifecycle', () => {
     normalizeProgressionScopes(S)
     const [a, b] = S.routines.map(routine => routine.ex[0])
     S.workouts.push(
-      { routineId: 'a', d: '2026-08-01', entries: [completed(a, 8, [10, 10, 10])] },
+      { routineId: 'a', d: '2026-08-01', entries: [completed(a, 8, [10, 10, 10])] }
+    )
+    expect(nextPrescription(S, b, S.routines[1])).toMatchObject({
+      kind: 'hold',
+      weight: 70,
+      reps: 10,
+      topRangeStreak: 1,
+      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
+    })
+
+    S.workouts.push(
       { routineId: 'b', d: '2026-08-08', entries: [completed(b, 9, [10, 10, 10])] }
     )
     expect(nextPrescription(S, a, S.routines[0])).toMatchObject({
