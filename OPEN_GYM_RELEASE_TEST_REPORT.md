@@ -1366,7 +1366,7 @@ cd frontend
 node scripts/check-equipment-browser.mjs
 ```
 
-Esito: **14 controlli superati, 0 falliti**.
+Esito aggiornato al 2026-09-17: **18 controlli superati, 0 falliti**.
 
 - elenco profili visibile e senza overflow orizzontale a 320 px;
 - editor del profilo visibile, senza overflow e con label leggibili;
@@ -1379,6 +1379,11 @@ Esito: **14 controlli superati, 0 falliti**.
 - colore success indipendente dal tema: `rgb(48, 209, 88)` scuro e
   `rgb(19, 115, 51)` chiaro;
 - testo della guida ancora visibile dopo il cambio tema.
+- editor a 320 px con `Inventario dischi (opzionale)` e spiegazione della modalità senza
+  censimento;
+- rimozione delle righe inventario dall'editor e persistenza effettiva dell'array vuoto;
+- guida senza inventario: target 116,75 kg, bilanciere 9,75 kg e 53,5 kg per lato;
+- guida manuale per lato ancora verde, accessibile e senza overflow orizzontale.
 
 Il profilo `.edge-req7-audit` è soltanto un artefatto temporaneo di test e può essere eliminato
 dopo l'esecuzione. Questo controllo non sostituisce screen reader, input tattile e collaudo sui
@@ -1495,7 +1500,74 @@ come E2E già eseguiti in questa postazione.
 5. Coprire il colore o usare modalità monocromatica: icona e testo devono continuare a distinguere
    successo, warning e istruzione manuale.
 
-### 9.10 Gate manuali ancora necessari sull'ambiente reale
+### 9.10 Estensione — calcolo per lato senza censimento dischi
+
+Data verifica: **2026-09-17**
+
+Stato: **implementata, validata, pronta per commit**
+
+L'inventario dei dischi è ora opzionale per bilancieri, manubri caricabili e macchine caricate a
+dischi. Se l'utente configura soltanto la tara, openGym calcola il peso esatto da aggiungere a
+ogni lato e lascia la composizione manuale. Non viene aggiunto alcun campo persistente né rimossa
+la modalità completa:
+
+- inventario vuoto: calcolo aritmetico per lato, box verde e composizione lasciata all'utente;
+- inventario compilato: solver bounded invariato, con composizione esatta oppure vicini
+  inferiore/superiore;
+- target uguale alla tara: uso dell'attrezzo vuoto;
+- target sotto la tara: warning invariato;
+- obiettivo e peso registrato non vengono mai modificati dal suggerimento.
+
+Caso reale verificato:
+
+```text
+Obiettivo totale:          116,75 kg
+Bilanciere vuoto:            9,75 kg
+Residuo totale:             107,00 kg
+Carico manuale per lato:     53,50 kg
+```
+
+Messaggio italiano risultante:
+
+```text
+Obiettivo 116,75 kg · Bilanciere Decathlon
+Aggiungi 53,5 kg di dischi per lato al bilanciere da 9,75 kg.
+Componi il carico manualmente con i dischi disponibili.
+```
+
+La divisione viene mantenuta fino a tre decimali: ad esempio un residuo di 1,01 kg produce
+0,505 kg per lato e non viene arrotondato in modo da alterare il totale. Lo snapshot già previsto
+congela tara e inventario all'avvio: aggiungere dischi al profilo non cambia il workout attivo o
+quelli completati; una nuova sessione torna automaticamente alla composizione dettagliata.
+
+Test eseguiti:
+
+```text
+Suite mirate attrezzatura   10 file, 104 test superati, 0 falliti
+Regressione completa        34 file, 602 test superati, 0 falliti
+Build Vite                  superata, 123 moduli trasformati
+Locali                      11 lingue, 843 chiavi ciascuna, sincronizzate
+Edge headless 320 px        18 controlli superati, 0 falliti
+git diff --check            superato, soli avvisi LF/CRLF
+```
+
+La copertura nuova verifica il caso 116,75/9,75, il bilanciere vuoto, il target sotto tara, la
+precisione al millesimo, la permanenza del solver quando l'inventario esiste, il testo italiano e
+inglese, bilancieri/manubri/macchine a dischi, salvataggio reale dell'inventario vuoto
+dall'editor, colore/accessibilità, assenza di overflow e immutabilità dello snapshot fra
+sessioni.
+
+Procedura manuale:
+
+1. Aprire `Impostazioni → Attrezzatura → Bilanciere Decathlon`.
+2. Impostare la tara a 9,75 kg e lasciare vuoto `Inventario dischi (opzionale)`.
+3. Avviare un nuovo workout con obiettivo 116,75 kg.
+4. Verificare il box verde con 53,5 kg per lato e nessun warning di carico non componibile.
+5. Terminare o scartare la sessione, censire in seguito i dischi e avviarne una nuova.
+6. Verificare che la nuova sessione mostri la composizione calcolata o le alternative più vicine,
+   mentre snapshot e workout precedenti conservino la configurazione con la quale erano iniziati.
+
+### 9.11 Gate manuali ancora necessari sull'ambiente reale
 
 Non eseguiti in questa postazione:
 

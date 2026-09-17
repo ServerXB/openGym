@@ -112,7 +112,7 @@ await evaluate(`(() => {
   row.click()
 })()`)
 await waitFor(
-  `document.querySelector('.sheet')?.innerText.includes('Available weights and quantities') === true`,
+  `document.querySelector('.sheet')?.innerText.includes('Plate inventory (optional)') === true`,
   'equipment item editor'
 )
 const itemEditor = await evaluate(`(() => {
@@ -128,8 +128,30 @@ const itemEditor = await evaluate(`(() => {
     labels
   }
 })()`)
-await evaluate(`document.querySelector('.mback')?.click()`)
-await waitFor(`document.querySelector('.sheet') === null`, 'equipment item editor close')
+await evaluate(`document.querySelector('.sheet button[aria-label="Remove inventory row"]')?.click()`)
+await waitFor(
+  `document.querySelectorAll('.sheet button[aria-label="Remove inventory row"]').length === 1`,
+  'first inventory row removal'
+)
+await evaluate(`document.querySelector('.sheet button[aria-label="Remove inventory row"]')?.click()`)
+await waitFor(
+  `document.querySelectorAll('.sheet button[aria-label="Remove inventory row"]').length === 0`,
+  'second inventory row removal'
+)
+await evaluate(`(() => {
+  const save = [...document.querySelectorAll('.sheet button')]
+    .find(button => button.textContent.trim() === 'Save')
+  if (!save) throw new Error('Equipment save button not found')
+  save.click()
+})()`)
+await waitFor(`document.querySelector('.sheet') === null`, 'equipment item editor save')
+await waitFor(
+  `JSON.parse(localStorage.getItem('gym_state_v1')).equipmentProfiles[0].items[0].denominations.length === 0`,
+  'empty inventory persistence'
+)
+const profileAfterEditor = await evaluate(
+  `JSON.parse(localStorage.getItem('gym_state_v1')).equipmentProfiles[0]`
+)
 
 state.active = {
   id: 'browser-audit', d: '2026-09-06', start: Date.now(), routineId: null,
@@ -173,6 +195,33 @@ const lightWorkout = await evaluate(`(() => {
   }
 })()`)
 
+const manualSnapshot = JSON.parse(JSON.stringify(profileAfterEditor))
+manualSnapshot.workoutUnit = 'kg'
+manualSnapshot.items[0].label = 'Bilanciere Decathlon'
+manualSnapshot.items[0].tareWeight = 9.75
+manualSnapshot.items[0].denominations = []
+state.lang = 'it'
+state.theme = 'dark'
+state.active.equipmentSnapshot = manualSnapshot
+state.active.entries[0].equipmentUse.label = 'Bilanciere Decathlon'
+state.active.entries[0].sets[0].w = 116.75
+await saveState()
+await navigate('/?audit=workout-manual#/workout')
+await waitFor(
+  `document.querySelector('.equipment-guide.success')?.innerText.includes('Componi il carico manualmente') === true`,
+  'manual per-side workout guide'
+)
+const manualWorkout = await evaluate(`(() => {
+  const guide = document.querySelector('.equipment-guide.success')
+  return {
+    text: guide?.innerText || '',
+    role: guide?.getAttribute('role') || '',
+    live: guide?.getAttribute('aria-live') || '',
+    viewport: innerWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }
+})()`)
+
 const checks = {
   profileListVisible: profileList.text.includes('Palestra')
     && profileList.text.includes('Active equipment profile'),
@@ -182,7 +231,9 @@ const checks = {
   profileEditorNoHorizontalOverflow: profileEditor.scrollWidth <= profileEditor.viewport,
   profileEditorLabelsReadable: profileEditor.labels.includes('Name'),
   itemEditorVisible: itemEditor.name === 'Bilanciere olimpico'
-    && itemEditor.text.includes('Available weights and quantities'),
+    && itemEditor.text.includes('Plate inventory (optional)')
+    && itemEditor.text.includes('Leave the plate inventory empty'),
+  editorSavedEmptyInventory: profileAfterEditor.items[0].denominations.length === 0,
   itemEditorNoHorizontalOverflow: itemEditor.scrollWidth <= itemEditor.clientWidth,
   itemEditorLabelsReadable: ['Name', 'Empty equipment weight', 'Weight', 'Quantity']
     .every(label => itemEditor.labels.includes(label)),
@@ -193,10 +244,15 @@ const checks = {
   darkSemanticColor: darkWorkout.color === 'rgb(48, 209, 88)',
   lightSemanticColor: lightWorkout.theme === 'light'
     && lightWorkout.color === 'rgb(19, 115, 51)',
-  lightGuideStillVisible: lightWorkout.text.includes('20 kg + 5 kg per side')
+  lightGuideStillVisible: lightWorkout.text.includes('20 kg + 5 kg per side'),
+  manualPerSideGuide: manualWorkout.text.includes('Obiettivo 116,75 kg · Bilanciere Decathlon')
+    && manualWorkout.text.includes('53,5 kg di dischi per lato')
+    && manualWorkout.text.includes('Componi il carico manualmente'),
+  manualGuideAccessible: manualWorkout.role === 'status' && manualWorkout.live === 'polite',
+  manualGuideNoHorizontalOverflow: manualWorkout.scrollWidth <= manualWorkout.viewport
 }
 
-console.log(JSON.stringify({ checks, profileList, profileEditor, itemEditor, darkWorkout, lightWorkout }, null, 2))
+console.log(JSON.stringify({ checks, profileList, profileEditor, itemEditor, darkWorkout, lightWorkout, manualWorkout }, null, 2))
 failed = Object.values(checks).some(value => !value)
 } finally {
   try {

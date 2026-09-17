@@ -36,12 +36,15 @@ const KIND_HELP = {
 
 const CATALOG_EQUIPMENT = [...new Set(EXDB.map(ex => ex.eq).filter(Boolean))].sort()
 
-const inventoryKind = kind => [
+const plateInventoryKind = kind => [
   EQUIPMENT_KIND.SYMMETRIC_BAR,
   EQUIPMENT_KIND.LOADABLE_DUMBBELL,
-  EQUIPMENT_KIND.FIXED_WEIGHT,
-  EQUIPMENT_KIND.MACHINE_STACK,
   EQUIPMENT_KIND.PLATE_LOADED_MACHINE
+].includes(kind)
+
+const inventoryKind = kind => plateInventoryKind(kind) || [
+  EQUIPMENT_KIND.FIXED_WEIGHT,
+  EQUIPMENT_KIND.MACHINE_STACK
 ].includes(kind)
 
 const hasTare = kind => [
@@ -123,10 +126,16 @@ function InventoryEditor({ draft, setDraft, unit }) {
     denominations: current.denominations.filter((_row, rowIndex) => rowIndex !== index)
   }))
   return <div className="equipment-inventory">
-    <div className="equipment-subhead">{t(stack ? 'Selectable loads' : 'Available weights and quantities')}</div>
+    <div className="equipment-subhead">{t(stack
+      ? 'Selectable loads'
+      : plateInventoryKind(draft.kind)
+        ? 'Plate inventory (optional)'
+        : 'Available weights and quantities')}</div>
     <p className="cfg-help">{t(stack
       ? 'Enter every value printed on the machine stack.'
       : 'Quantities are total pieces in this profile, not pieces per side.')}</p>
+    {plateInventoryKind(draft.kind) &&
+      <p className="cfg-help">{t('Leave the plate inventory empty to calculate only the load per side. Add plates later for calculated compositions and nearest alternatives.')}</p>}
     {rows.map((row, index) => <div className="equipment-inventory-row" key={index}>
       <Stepper label={t('Weight')} unit={unit} value={row.weight || 0} step={0.25}
         onChange={value => change(index, 'weight', value)} />
@@ -306,7 +315,7 @@ function ProfileEditor({ profileId }) {
           ].filter(Boolean).join(' · ')}
           accessory="chevron" onClick={() => editItem(item)} />
       )) : <Row icon="wrench" iconTint="var(--grey)" title={t('No equipment in this profile')}
-        subtitle={t('Add a tool and its real inventory to enable loading suggestions.')} />}
+        subtitle={t('Add the equipment you use. Plate inventory is optional and can be added later for detailed loading suggestions.')} />}
     </Section>
 
     <Button variant="primary" icon="plus" onClick={() => editItem(null)}>{t('Add equipment')}</Button>

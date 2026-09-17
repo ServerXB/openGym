@@ -1,9 +1,13 @@
 import { fmtLoad } from '../lib/format.js'
-import { t } from '../lib/i18n.js'
+import { dateLocale, t } from '../lib/i18n.js'
 import { EQUIPMENT_KIND } from '../lib/equipment-load.js'
 import Icon from './Icon.jsx'
 
 const load = (value, unit) => `${fmtLoad(value)} ${unit}`
+const preciseLoad = (value, unit) => `${
+  (Math.round((Number(value) + Number.EPSILON) * 1000) / 1000)
+    .toLocaleString(dateLocale(), { maximumFractionDigits: 3 })
+} ${unit}`
 
 const composition = (parts, unit) => (parts || []).length
   ? parts.map(part => part.count > 1
@@ -62,6 +66,33 @@ export function equipmentGuideCopy(guide) {
       detail: guide.exact.composition.length
         ? t('Empty equipment {0}; load {1}{2}.', load(guide.tareWeight, guide.unit), composition(guide.exact.composition, guide.unit), guide.sideCount === 2 ? ' ' + t('per side') : '')
         : t('Use the empty equipment at {0}; no plates are needed.', load(guide.tareWeight, guide.unit))
+    }
+  }
+
+  if (guide.status === 'manual_per_side') {
+    const pointLoad = preciseLoad(guide.perPointWeight, guide.unit)
+    const emptyLoad = load(guide.tareWeight, guide.unit)
+    if (guide.kind === EQUIPMENT_KIND.SYMMETRIC_BAR) {
+      return {
+        tone: 'success', icon: 'checkCircle', heading,
+        detail: t('Add {0} of plates per side to the {1} bar.', pointLoad, emptyLoad),
+        note: t('Choose the plate combination manually from the plates available.')
+      }
+    }
+    if (guide.kind === EQUIPMENT_KIND.LOADABLE_DUMBBELL) {
+      return {
+        tone: 'success', icon: 'checkCircle', heading,
+        detail: t('Each dumbbell: add {0} of plates per side to the {1} handle. Choose the plate combination manually.', pointLoad, emptyLoad),
+        note: t('Prepare {0}; the logged weight is for one dumbbell.', guide.implementCount === 1
+          ? t('one dumbbell')
+          : t('{0} dumbbells', guide.implementCount))
+      }
+    }
+    return {
+      tone: 'success', icon: 'checkCircle', heading,
+      detail: guide.sideCount === 2
+        ? t('Add {0} per side; empty equipment resistance is {1}. Choose the plate combination manually.', pointLoad, emptyLoad)
+        : t('Add {0}; empty equipment resistance is {1}. Choose the plate combination manually.', pointLoad, emptyLoad)
     }
   }
 

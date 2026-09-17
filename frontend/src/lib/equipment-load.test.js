@@ -169,6 +169,59 @@ describe('equipment binding resolution', () => {
 })
 
 describe('loading guide', () => {
+  it('calculates the load per side when plate inventory is intentionally empty', () => {
+    const item = bar({ tareWeight: 9.75, denominations: [] })
+    const guide = calculateLoadingGuide({
+      profile: profile([item]), equipmentUse: resolved(item), targetWeight: 116.75, workoutUnit: 'kg'
+    })
+    expect(guide).toMatchObject({
+      status: 'manual_per_side',
+      targetWeight: 116.75,
+      tareWeight: 9.75,
+      sideCount: 2,
+      perPointWeight: 53.5
+    })
+  })
+
+  it('keeps millimetric per-side arithmetic exact and handles an empty bar without inventory', () => {
+    const item = bar({ tareWeight: 9.75, denominations: [] })
+    expect(calculateLoadingGuide({
+      profile: profile([item]), equipmentUse: resolved(item), targetWeight: 10.76, workoutUnit: 'kg'
+    })).toMatchObject({ status: 'manual_per_side', perPointWeight: 0.505 })
+    expect(calculateLoadingGuide({
+      profile: profile([item]), equipmentUse: resolved(item), targetWeight: 9.75, workoutUnit: 'kg'
+    })).toMatchObject({ status: 'exact', exact: { weight: 9.75, composition: [] } })
+    expect(calculateLoadingGuide({
+      profile: profile([item]), equipmentUse: resolved(item), targetWeight: 9.5, workoutUnit: 'kg'
+    })).toMatchObject({ status: 'below_tare', tareWeight: 9.75 })
+  })
+
+  it('applies inventory-free arithmetic to loadable dumbbells and plate-loaded machines', () => {
+    const dumbbell = {
+      id: 'db', label: 'Loadable dumbbell', kind: EQUIPMENT_KIND.LOADABLE_DUMBBELL,
+      catalogEquipment: 'dumbbell', tareWeight: 2, denominations: []
+    }
+    expect(calculateLoadingGuide({
+      profile: profile([dumbbell]),
+      equipmentUse: resolved(dumbbell, { implementCount: 2 }),
+      targetWeight: 20,
+      workoutUnit: 'kg'
+    })).toMatchObject({
+      status: 'manual_per_side', implementCount: 2, sideCount: 2, perPointWeight: 9
+    })
+
+    const machine = sideCount => ({
+      id: `machine-${sideCount}`, label: 'Plate machine', kind: EQUIPMENT_KIND.PLATE_LOADED_MACHINE,
+      tareWeight: 10, sideCount, denominations: []
+    })
+    for (const [sideCount, perPointWeight] of [[1, 50], [2, 25]]) {
+      const item = machine(sideCount)
+      expect(calculateLoadingGuide({
+        profile: profile([item]), equipmentUse: resolved(item), targetWeight: 60, workoutUnit: 'kg'
+      })).toMatchObject({ status: 'manual_per_side', sideCount, perPointWeight })
+    }
+  })
+
   it('loads a 70 kg target on a 20 kg bar as 20 + 5 kg per side', () => {
     const item = bar()
     const guide = calculateLoadingGuide({

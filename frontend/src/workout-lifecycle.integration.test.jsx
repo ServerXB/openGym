@@ -151,4 +151,42 @@ describe('workout lifecycle timestamp wiring', () => {
     beginWorkout('push', 78)
     expect(harness.S.active.equipmentSnapshot.items[0].tareWeight).toBe(15)
   })
+
+  it('keeps manual per-side guidance frozen, then enables compositions in the next workout', () => {
+    harness.S.equipmentProfiles = [{
+      id: 'gym', name: 'Gym', unit: 'kg', items: [{
+        id: 'bar', label: 'Decathlon bar', kind: 'symmetric_bar', catalogEquipment: 'barbell',
+        tareWeight: 9.75, denominations: []
+      }]
+    }]
+    harness.S.activeEquipmentProfileId = 'gym'
+    harness.S.routines = [{
+      id: 'push', name: 'Push', ex: [{
+        id: '0025', sets: 1, reps: 8, weight: 116.75,
+        equipmentUse: {
+          mode: 'item', profileId: 'gym', itemId: 'bar',
+          catalogEquipment: 'barbell', loadSemantics: 'total'
+        }
+      }]
+    }]
+
+    beginWorkout('push', 78)
+    expect(equipmentGuideForEntry(
+      harness.S.active.entries[0], harness.S.active.equipmentSnapshot
+    )).toMatchObject({ status: 'manual_per_side', perPointWeight: 53.5 })
+
+    harness.S.equipmentProfiles[0].items[0].denominations = [
+      { weight: 20, count: 4 }, { weight: 10, count: 2 },
+      { weight: 2.5, count: 2 }, { weight: 1, count: 2 }
+    ]
+    expect(equipmentGuideForEntry(
+      harness.S.active.entries[0], harness.S.active.equipmentSnapshot
+    )).toMatchObject({ status: 'manual_per_side', perPointWeight: 53.5 })
+
+    discardActiveWorkout()
+    beginWorkout('push', 78)
+    expect(equipmentGuideForEntry(
+      harness.S.active.entries[0], harness.S.active.equipmentSnapshot
+    )).toMatchObject({ status: 'exact', exact: { weight: 116.75 } })
+  })
 })

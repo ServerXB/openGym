@@ -284,6 +284,27 @@ function plateGuide(item, targetUnits, use, sideCount) {
   const loadingPoints = Math.max(1, sideCount)
   const inventoryDivisor = loadingPoints * (item.kind === EQUIPMENT_KIND.LOADABLE_DUMBBELL ? use.implementCount : 1)
   const residual = targetUnits - tareUnits
+  // Plate inventory is optional. With only the empty-equipment weight configured we can still
+  // provide exact arithmetic per loading point and let the athlete compose the plates. Once an
+  // inventory exists, the bounded solver below retains the detailed exact/nearest guide.
+  if (residual === 0) {
+    return {
+      status: 'exact',
+      tareWeight: item.tareWeight,
+      sideCount: loadingPoints,
+      inventoryDivisor,
+      exact: { weight: item.tareWeight, composition: [] }
+    }
+  }
+  if (!item.denominations.length) {
+    return {
+      status: 'manual_per_side',
+      tareWeight: item.tareWeight,
+      sideCount: loadingPoints,
+      inventoryDivisor,
+      perPointWeight: Math.round((residual / (100 * loadingPoints) + Number.EPSILON) * 1000) / 1000
+    }
+  }
   const perPointTarget = residual / loadingPoints
   const solved = solveBoundedLoad(item.denominations, perPointTarget, { inventoryDivisor })
   if (solved.limited) {
