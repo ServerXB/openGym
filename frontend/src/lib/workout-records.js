@@ -6,6 +6,27 @@ import { progressionIdOf, routineExerciseIdOf } from './progression-scope.js'
 const nonEmptyId = value =>
   typeof value === 'string' && value.trim() ? value.trim() : null
 
+/**
+ * Suggest the value shown in the post-exercise weight review.
+ *
+ * The review belongs to one active workout entry. A personal record from another routine is
+ * useful as a comparison, but it is not evidence of what was lifted in this session and must
+ * never become the editable default. Falling back to the frozen target keeps legacy/incomplete
+ * entries usable without consulting exercise-wide state.
+ */
+export function suggestedTopWeight(entry) {
+  if (!entry) return 0
+  const completed = (entry.sets || [])
+    .filter(set => set?.done)
+    .map(set => Number(set.w))
+    .filter(weight => Number.isFinite(weight) && weight >= 0)
+  const currentMaximum = Math.max(0, ...completed)
+  if (completed.length) return currentMaximum
+
+  const target = Number(entry.target?.weight)
+  return Number.isFinite(target) && target > 0 ? target : 0
+}
+
 // A set-count choice made during a workout opens a new progression group for that routine
 // slot, while the active prescription deliberately keeps the group it started with. When the
 // workout finishes, its uniform prescribed load is therefore evidence for two baselines:

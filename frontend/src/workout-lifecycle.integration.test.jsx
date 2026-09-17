@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { workoutDateKey } from './lib/workout-time.js'
 import { equipmentGuideForEntry } from './lib/equipment-load.js'
 
@@ -38,7 +39,7 @@ vi.mock('./store/useUI.js', () => {
 vi.mock('./lib/nav.js', () => ({ nav: harness.nav }))
 vi.mock('./lib/sound.js', () => ({ beep: vi.fn(), vibrate: vi.fn() }))
 
-import { beginWorkout, discardActiveWorkout, doFinishWorkout } from './sheets.jsx'
+import { beginWorkout, discardActiveWorkout, doFinishWorkout, topWeightSheet } from './sheets.jsx'
 
 const emptyState = () => ({
   routines: [], workouts: [], active: null,
@@ -54,6 +55,40 @@ beforeEach(() => {
   harness.stopRest.mockReset()
   harness.openSheet.mockReset()
   harness.toast.mockReset()
+})
+
+describe('workout completion weight review', () => {
+  it('preselects the active day weight instead of the same exercise global record', () => {
+    harness.S.workouts = [{
+      id: 'monday-workout', routineId: 'monday', d: '2026-09-14', start: 1,
+      entries: [{
+        id: '0405', routineExerciseId: 'slot-monday', progressionId: 'pg-monday',
+        target: { weight: 24, prog: 'confirmed_rep_range', sets: 4 },
+        sets: Array.from({ length: 4 }, () => ({ w: 24, r: 9, done: true })),
+        topW: 24
+      }]
+    }]
+    harness.S.exWeights = { '0405': { w: 24, d: '2026-09-14' } }
+    harness.S.progressionWeights = {
+      'pg-monday': { w: 24, d: '2026-09-14' },
+      'pg-thursday': { w: 20, d: '2026-09-10' }
+    }
+    harness.S.active = {
+      id: 'thursday-workout', routineId: 'thursday', cur: 0,
+      entries: [{
+        id: '0405', routineExerciseId: 'slot-thursday', progressionId: 'pg-thursday',
+        target: { weight: 20, prog: 'confirmed_rep_range', sets: 3 },
+        sets: Array.from({ length: 3 }, () => ({ w: 20, r: 10, done: true }))
+      }]
+    }
+
+    topWeightSheet(0)
+    const renderSheet = harness.openSheet.mock.calls[0][0]
+    const html = renderToStaticMarkup(renderSheet(vi.fn()))
+
+    expect(html).toContain('class="bw-read">20<span class="u"> kg</span>')
+    expect(html).toContain('24 kg')
+  })
 })
 
 describe('workout lifecycle timestamp wiring', () => {

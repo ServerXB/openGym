@@ -19,7 +19,7 @@ import { loadOfWorkouts } from './lib/muscles.js'
 import { parseImport, mergeImport } from './lib/import-csv.js'
 import { buildPlanBundle, parsePlan, mergePlan, printPlan } from './lib/plan-share.js'
 import { estimate1RM, best1RM, REP_CAP } from './lib/onerm.js'
-import { applyActiveTopWeight, applyWorkoutWeights, recordsForWorkout } from './lib/workout-records.js'
+import { applyActiveTopWeight, applyWorkoutWeights, recordsForWorkout, suggestedTopWeight } from './lib/workout-records.js'
 import { buildScopedWorkoutEntry, completedWorkoutEntries } from './lib/workout-scope.js'
 import { unitPrescribedComplete, workoutSetStatus } from './lib/workout-set-status.js'
 import { nextPrescription, policyFor, loadIncrementFor, loadIncrementRawValidation, loadIncrementValidation, roundLoad, POLICIES_FOR, POLICY_NAME, POLICY_DESC, MAX_BW_SETS } from './lib/progression.js'
@@ -1313,7 +1313,10 @@ function TopWeight({ entryIdx, close }) {
   const ex = entry && EXIDX[entry.id]
   const maxSet = entry ? Math.max(0, ...entry.sets.filter(s => s.done).map(s => s.w || 0)) : 0
   const prevBest = entry ? Math.max((st.exWeights[entry.id] || {}).w || 0, bestWeightFor(st, entry.id)) : 0
-  const [v, setV] = useState(entry ? (Math.max(maxSet, prevBest) || entry.target?.weight || 0) : 0)
+  // The editable value describes this entry only. `prevBest` is exercise-wide by design and is
+  // kept below as a comparison; using it as the default would copy a heavier routine/day into
+  // the current workout when both slots use the same catalogue exercise.
+  const [v, setV] = useState(() => suggestedTopWeight(entry))
   useEffect(() => { if (!entry || pureBodyweight) close() }, [!entry, pureBodyweight])
 
   const units = supersetUnits(A ? A.entries : [])

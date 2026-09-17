@@ -177,6 +177,41 @@ describe('progression scopes across the workout lifecycle', () => {
     expect(confirmedRepRangeRestControl(S, b)).toBeNull()
   })
 
+  it('keeps Monday and Thursday prescriptions isolated when a legacy review copied the global best', () => {
+    const S = {
+      unit: 'kg', restSec: 90, workouts: [], progressionControls: {}, exWeights: {},
+      progressionWeights: {},
+      routines: [
+        { id: 'monday', ex: [confirmed({ sets: 4, weight: 24, minReps: 8, maxReps: 10, inc: 2 })] },
+        { id: 'thursday', ex: [confirmed({ sets: 3, weight: 19, minReps: 10, maxReps: 12, inc: 1 })] }
+      ]
+    }
+    normalizeProgressionScopes(S)
+    const [monday, thursday] = S.routines.map(routine => routine.ex[0])
+    expect(monday.progressionId).not.toBe(thursday.progressionId)
+    S.exWeights[ID] = { w: 24, d: '2026-09-14' }
+    S.progressionWeights[monday.progressionId] = { w: 24, d: '2026-09-14' }
+    S.progressionWeights[thursday.progressionId] = { w: 19, d: '2026-09-10' }
+
+    const mondayEntry = completed(monday, 8, [9, 9, 9, 9])
+    mondayEntry.topW = 24
+    const thursdayEntry = completed(thursday, 10, [12, 12, 12])
+    // Characterizes already-written backups affected by the old completion-sheet default.
+    // Confirmed must continue to trust the uniform scoped rows, not this global PR copy.
+    thursdayEntry.topW = 24
+    S.workouts.push(
+      { routineId: 'monday', d: '2026-09-14', entries: [mondayEntry] },
+      { routineId: 'thursday', d: '2026-09-17', entries: [thursdayEntry] }
+    )
+
+    expect(nextPrescription(S, monday, S.routines[0])).toMatchObject({
+      weight: 24, reps: 10
+    })
+    expect(nextPrescription(S, thursday, S.routines[1])).toMatchObject({
+      weight: 19, reps: 12, topRangeStreak: 1
+    })
+  })
+
   it('snapshots identities without changing them when the routine is edited later', () => {
     const S = { routines: [{ id: 'a', ex: [confirmed()] }], exWeights: {} }
     normalizeProgressionScopes(S)

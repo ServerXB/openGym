@@ -1823,3 +1823,202 @@ averle terminate normalmente.
    minimo del range.
 7. Ripetere con due configurazioni materialmente diverse: l'editor deve indicare
    `Progressione indipendente` e le conferme non devono essere combinate.
+
+## 12. Incidente: peso di un'altra giornata nella schermata di fine esercizio
+
+Data verifica: **2026-09-17**
+
+Stato: **bug confermato, correzione implementata, regressione completa superata, pronto per il
+commit**.
+
+### 12.1 Sintomo e limite del backup
+
+Il sintomo segnalato è riproducibile: completando in una routine più leggera un esercizio già
+eseguito con un carico maggiore in un'altra giornata, la schermata di fine esercizio poteva
+preselezionare il carico maggiore storico invece di quello appena eseguito.
+
+Il file `bug/state-RuyIVpkH8ixov1pP.json` non contiene un workout attivo e termina con il workout
+del 14 settembre 2026; non può quindi contenere materialmente la sessione del 17 settembre
+descritta nella segnalazione. Contiene però dieci occorrenze precedenti dello stesso difetto, che
+permettono di identificarne la causa senza inferenze sul workout mancante.
+
+La cartella `bug/` è stata letta in sola lettura e resta esclusa dalla modifica.
+
+### 12.2 Evidenza forense nel JSON
+
+Sono state confrontate, in ordine cronologico, tutte le entry completate:
+
+- massimo peso delle sole serie marcate come completate nella sessione;
+- `topW` salvato dalla schermata di fine esercizio;
+- record globale già esistente per lo stesso `exerciseId` prima della sessione;
+- `routineExerciseId` e `progressionId` dello snapshot.
+
+Risultato: sono presenti **10 entry con `topW` maggiore di ogni serie realmente completata**. In
+10 casi su 10 il valore anomalo coincide esattamente con il record globale precedente dello stesso
+esercizio:
+
+| Esercizio | Routine più leggera | Sessioni coinvolte | Serie realmente eseguite | `topW` errato copiato |
+|---|---|---|---:|---:|
+| `0405` | PUSH 2 | 27/08, 03/09, 10/09 | 19, 19 e 20 kg | 24 kg |
+| `0334` | PUSH 2 | 27/08, 03/09, 10/09 | 8, 8 e 9 kg | 12 kg |
+| `0085` | LEGS / CORE | 29/08, 05/09, 12/09 | 64,75 kg | 84,75 kg |
+| `0200` | PUSH 2 | 10/09 | 18 kg | 26 kg |
+
+Gli episodi del 3, 5, 10 e 12 settembre hanno già ID moderni e distinti. Questo dimostra che il
+difetto non dipende da una collisione degli scope: aggirava lo scope dopo il completamento,
+leggendo deliberatamente il record globale per il solo `exerciseId`.
+
+L'audit delle configurazioni omonime conferma inoltre che:
+
+- ogni occorrenza nelle routine ha un `routineExerciseId` stabile e distinto;
+- PUSH 1 e PUSH 2 per `0405` hanno `progressionId` distinti;
+- PUSH 1 e PUSH 2 per `0334` hanno `progressionId` distinti;
+- LEGS 1 e LEGS / CORE per `0085` hanno `progressionId` distinti;
+- non sono emersi duplicati di ID di slot né lookup operativi moderni che scelgano la prima entry
+  soltanto per `exerciseId`.
+
+### 12.3 Causa radice
+
+La schermata `TopWeight` calcolava correttamente due valori diversi:
+
+1. `maxSet`: il massimo delle serie completate nell'entry attiva;
+2. `prevBest`: il record storico globale dell'esercizio, intenzionalmente condiviso tra routine
+   per PR e statistiche.
+
+Il campo modificabile veniva però inizializzato con:
+
+```text
+max(maxSet della sessione corrente, prevBest globale dell'esercizio)
+```
+
+Esempio reale del backup:
+
+```text
+PUSH 1 / lunedì:    record globale 24 kg
+PUSH 2 / giovedì:   serie completate 20/20/20 kg
+vecchio default:    max(20, 24) = 24 kg
+pressione di Salva: topW del giovedì = 24 kg
+```
+
+La scrittura finale usa correttamente l'indice dell'entry attiva; l'errore era quindi nel valore
+precompilato, non nella selezione dell'entry da aggiornare.
+
+### 12.4 Impatto sugli algoritmi e sui dati esistenti
+
+Per **Confirmed Rep-Range**, il peso operativo e la prescrizione successiva sono rimasti corretti:
+`progressionWorkingWeight` considera soltanto il blocco uniforme delle serie prescritte e non
+`topW`. Nel backup, ad esempio, PUSH 2 conserva correttamente 20 kg nel proprio
+`progressionWeights` nonostante `topW=24`.
+
+Il difetto ha comunque effetti reali:
+
+- la sessione storica può mostrare un `topW` mai eseguito quel giorno;
+- il grafico del peso della singola giornata può risultare sovrastimato, perché include `topW`;
+- il record riepilogativo può contenere una conferma fuorviante;
+- con strategie diverse da Confirmed, `topW` partecipa anche al peso operativo e avrebbe potuto
+  contaminare la baseline dello scope più leggero.
+
+I vecchi `topW` non vengono corretti automaticamente. Il dato non contiene la provenienza
+necessaria per distinguere con certezza una preselezione accettata per errore da un peso maggiore
+inserito intenzionalmente dall'utente. Una migrazione euristica rischierebbe quindi di cancellare
+record validi. Workout, serie, snapshot e cronologia esistenti restano immutati.
+
+### 12.5 Correzione implementata
+
+È stata introdotta una funzione di dominio unica per il valore suggerito dalla revisione finale:
+
+1. usa esclusivamente il massimo delle serie completate nell'entry corrente;
+2. ignora le righe non completate, anche se contengono un peso maggiore;
+3. se nessuna riga è completata, usa il peso congelato in `target.weight`;
+4. conserva correttamente anche uno zero esplicitamente completato;
+5. non riceve lo stato globale e quindi non può leggere il record di un'altra routine.
+
+`prevBest` resta visibile soltanto come confronto sotto il controllo. Nell'esempio 20/24, la
+schermata mostra **20 kg** come valore da salvare e **24 kg** come record precedente; il salvataggio
+registra 20 kg nella sessione corrente.
+
+Non sono stati modificati formato JSON, schema, `routineExerciseId`, `progressionId`, condivisione
+intenzionale delle progressioni equivalenti, calcolo dei PR o workout già completati.
+
+### 12.6 Scenari automatici aggiunti
+
+I test sviluppati specificamente per l'incidente coprono:
+
+1. lunedì a 24 kg e giovedì a 20 kg con lo stesso `exerciseId` ma slot/scope distinti: il valore
+   suggerito e salvato è 20 kg;
+2. il record globale resta 24 kg e la baseline del lunedì non viene modificata;
+3. la baseline Confirmed del giovedì resta 20 kg dopo il finish;
+4. una strategia non-Confirmed più leggera non eredita il record globale della routine pesante;
+5. una riga non completata con peso superiore non entra nel suggerimento;
+6. assenza di serie completate: fallback allo snapshot del target;
+7. carico zero realmente completato: nessun ripristino implicito del target;
+8. rendering reale del componente React: controllo principale a 20 kg e confronto storico a
+   24 kg;
+9. backward compatibility: un vecchio workout Confirmed con `topW=24` ma serie da 19 kg continua
+   a produrre la prescrizione dello scope da 19 kg;
+10. prescrizioni di lunedì e giovedì con range, serie, peso e incremento diversi restano
+    indipendenti.
+
+Il test UI fallisce con l'implementazione precedente, perché trova 24 kg nel controllo
+principale, e passa con la correzione.
+
+### 12.7 Risultati finali e no-regression
+
+Test mirati riproducibili:
+
+```powershell
+cd frontend
+npm.cmd test -- --run src/lib/workout-records.test.js `
+  src/workout-lifecycle.integration.test.jsx `
+  src/lib/progression-scope.integration.test.js src/lib/history.test.js
+```
+
+```text
+Test Files  4 passed (4)
+Tests       102 passed (102)
+Failed      0
+```
+
+Replay ristretto dopo l'aggiunta dello scenario lunedì/giovedì:
+
+```text
+Test Files  3 passed (3)
+Tests       37 passed (37)
+Failed      0
+```
+
+Regressione completa finale:
+
+```powershell
+cd frontend
+npm.cmd test -- --run
+```
+
+```text
+Test Files  34 passed (34)
+Tests       609 passed (609)
+Failed      0
+```
+
+Gate aggiuntivi:
+
+- build Vite: **SUPERATA**, 123 moduli trasformati;
+- avviso preesistente sui chunk oltre soglia: non bloccante e non collegato alla correzione;
+- locale check: **SUPERATO**, 11 lingue con 843 chiavi ciascuna;
+- `git diff --check`: **SUPERATO**, restano soltanto gli avvisi informativi LF/CRLF;
+- backup e immagini in `bug/`: **NON MODIFICATI** e non inclusi nella modifica.
+
+### 12.8 Replica manuale dopo il rilascio
+
+1. Configurare lo stesso esercizio in due routine materialmente diverse, per esempio lunedì
+   24 kg e giovedì 20 kg.
+2. Completare e salvare il workout del lunedì a 24 kg.
+3. Avviare il workout del giovedì e completare tutte le serie a 20 kg.
+4. Nella schermata di fine esercizio verificare che il controllo grande mostri 20 kg e che 24 kg
+   compaia soltanto come record precedente.
+5. Premere `Salva`, terminare il workout e riaprire lo storico del giovedì: il peso della giornata
+   deve restare 20 kg.
+6. Avviare nuovamente entrambe le routine e verificare che ciascuna riceva peso, target, range e
+   recupero dal proprio `progressionId`.
+7. Ripetere con una strategia Linear/Double nella routine più leggera: la prescrizione successiva
+   non deve adottare il record della routine pesante.

@@ -3,7 +3,8 @@ import {
   applyActiveTopWeight,
   applyWorkoutWeights,
   progressionWorkingWeight,
-  recordsForWorkout
+  recordsForWorkout,
+  suggestedTopWeight
 } from './workout-records.js'
 
 const history = (sets = [{ w: 100, r: 5, done: true }]) => ({
@@ -97,6 +98,88 @@ describe('recordsForWorkout', () => {
 })
 
 describe('global PR and scoped operational weights', () => {
+  it('suggests only the current session load when another routine has a heavier record', () => {
+    const monday = {
+      id: 'bench', routineExerciseId: 'slot-monday', progressionId: 'pg-monday',
+      target: { weight: 24, prog: 'confirmed_rep_range', sets: 4 },
+      sets: Array.from({ length: 4 }, () => ({ w: 24, r: 9, done: true })),
+      topW: 24
+    }
+    const thursday = {
+      id: 'bench', routineExerciseId: 'slot-thursday', progressionId: 'pg-thursday',
+      target: { weight: 20, prog: 'confirmed_rep_range', sets: 3 },
+      sets: Array.from({ length: 3 }, () => ({ w: 20, r: 10, done: true }))
+    }
+    const state = {
+      workouts: [{ routineId: 'monday', d: '2026-09-14', entries: [monday] }],
+      exWeights: { bench: { w: 24, d: '2026-09-14' } },
+      progressionWeights: {
+        'pg-monday': { w: 24, d: '2026-09-14' },
+        'pg-thursday': { w: 20, d: '2026-09-10' }
+      }
+    }
+
+    const suggested = suggestedTopWeight(thursday)
+    expect(suggested).toBe(20)
+    expect(applyActiveTopWeight(state, thursday, suggested, '2026-09-17')).toBe(true)
+    applyWorkoutWeights(state, [thursday], '2026-09-17')
+
+    expect(thursday.topW).toBe(20)
+    expect(monday.topW).toBe(24)
+    expect(state.exWeights.bench).toEqual({ w: 24, d: '2026-09-14' })
+    expect(state.progressionWeights).toEqual({
+      'pg-monday': { w: 24, d: '2026-09-14' },
+      'pg-thursday': { w: 20, d: '2026-09-17' }
+    })
+  })
+
+  it('does not contaminate a lighter non-Confirmed scope with the global exercise record', () => {
+    const state = {
+      exWeights: { row: { w: 80, d: '2026-09-14' } },
+      progressionWeights: {
+        'pg-heavy': { w: 80, d: '2026-09-14' },
+        'pg-light': { w: 50, d: '2026-09-10' }
+      }
+    }
+    const lightDay = {
+      id: 'row', progressionId: 'pg-light',
+      target: { weight: 50, prog: 'linear', sets: 3 },
+      sets: Array.from({ length: 3 }, () => ({ w: 50, r: 12, done: true }))
+    }
+
+    applyActiveTopWeight(state, lightDay, suggestedTopWeight(lightDay), '2026-09-17')
+
+    expect(lightDay.topW).toBe(50)
+    expect(state.exWeights.row).toEqual({ w: 80, d: '2026-09-17' })
+    expect(state.progressionWeights['pg-heavy']).toEqual({ w: 80, d: '2026-09-14' })
+    expect(state.progressionWeights['pg-light']).toEqual({ w: 50, d: '2026-09-17' })
+  })
+
+  it('uses the highest completed row and ignores heavier unfinished rows', () => {
+    expect(suggestedTopWeight({
+      target: { weight: 60 },
+      sets: [
+        { w: 60, done: true },
+        { w: 62, done: true },
+        { w: 100, done: false }
+      ]
+    })).toBe(62)
+  })
+
+  it('falls back to the frozen target when no weighted row is complete', () => {
+    expect(suggestedTopWeight({
+      target: { weight: 42 },
+      sets: [{ w: 100, done: false }]
+    })).toBe(42)
+  })
+
+  it('keeps an explicitly completed zero load instead of restoring the target', () => {
+    expect(suggestedTopWeight({
+      target: { weight: 42 },
+      sets: [{ w: 0, done: true }]
+    })).toBe(0)
+  })
+
   it('defers every Confirmed map update until the final edited workout is applied', () => {
     const previousGlobal = { w: 75, d: '2026-08-01' }
     const previousScoped = { w: 70, d: '2026-08-01' }
