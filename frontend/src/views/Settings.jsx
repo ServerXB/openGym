@@ -124,6 +124,16 @@ export default function Settings() {
         accessory="chevron" onClick={() => nav('/settings/equipment')} />
     </Section>
 
+    {/* ---------- workout start ---------- */}
+    <Section title={t('Workout start')}>
+      <Row icon="scale" iconTint="var(--teal)" title={t('Ask for body weight')}
+        subtitle={t('Show the quick check-in before every new workout. Manual logging stays available.')}>
+        <Switch ariaLabel={t('Ask for body weight')}
+          checked={S.askBodyweightBeforeWorkout !== false}
+          onChange={v => update(s => { s.askBodyweightBeforeWorkout = v })} />
+      </Row>
+    </Section>
+
     {/* ---------- during a workout ---------- */}
     <Section title={t('During a workout')} footer={wakeOK ? t('The screen stays on while a workout is running, so you don’t have to unlock your phone between sets.') : null}>
       <SelectRow icon="timer" iconTint="var(--orange)" title={t('Rest timer')}

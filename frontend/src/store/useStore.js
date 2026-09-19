@@ -11,6 +11,8 @@ const KEY = 'gym_state_v1'
 export const DEF = {
   unit: 'kg', restSec: 90, sound: true, keepAwake: true, lang: 'en',
   theme: 'dark', accent: 'lime', body: 'male', targetW: null,
+  // Preserve the historical start flow for profiles/backups created before this preference.
+  askBodyweightBeforeWorkout: true,
   bodyweight: [], routines: [], week: {}, dayPlan: {},
   exWeights: {}, progressionWeights: {}, workouts: [], active: null, customEx: [], gifSize: 'full',
   // User-defined bars, dumbbells, plates and machines. Profiles are ordinary synced state;

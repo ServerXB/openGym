@@ -71,7 +71,7 @@ export default {
   'reached!': 'erreicht!',
   '{0} to gain': 'noch {0} zunehmen',
   '{0} to lose': 'noch {0} abnehmen',
-  "No entries yet — log your weight to start the curve. It's also asked before every workout.": 'Noch keine Einträge — trag dein Gewicht ein, um die Kurve zu starten. Es wird auch vor jedem Training abgefragt.',
+  'No entries yet — log your weight to start the curve.': 'Noch keine Einträge — trag dein Gewicht ein, um die Kurve zu starten.',
   // --- exercise detail / picker / config ---
   'Best:': 'Bestwert:',
   'Add to my plan': 'Zu meinem Plan',
@@ -268,6 +268,9 @@ export default {
   'Light': 'Hell',
   'Accent color': 'Akzentfarbe',
   'General': 'Allgemein',
+  'Workout start': 'Trainingsstart',
+  'Ask for body weight': 'Körpergewicht abfragen',
+  'Show the quick check-in before every new workout. Manual logging stays available.': 'Zeige vor jedem neuen Training den kurzen Gewichts-Check-in. Manuelles Eintragen bleibt möglich.',
   'During a workout': 'Während des Trainings',
   'Keep screen awake': 'Bildschirm anlassen',
   'The screen stays on while a workout is running, so you don’t have to unlock your phone between sets.': 'Der Bildschirm bleibt an, solange ein Workout läuft — so musst du zwischen den Sätzen nicht entsperren.',

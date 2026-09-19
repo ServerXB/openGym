@@ -39,10 +39,11 @@ vi.mock('./store/useUI.js', () => {
 vi.mock('./lib/nav.js', () => ({ nav: harness.nav }))
 vi.mock('./lib/sound.js', () => ({ beep: vi.fn(), vibrate: vi.fn() }))
 
-import { beginWorkout, discardActiveWorkout, doFinishWorkout, topWeightSheet } from './sheets.jsx'
+import { beginWorkout, discardActiveWorkout, doFinishWorkout, startFlow, topWeightSheet } from './sheets.jsx'
 
 const emptyState = () => ({
   routines: [], workouts: [], active: null,
+  bodyweight: [],
   exWeights: {}, progressionWeights: {},
   equipmentProfiles: [], activeEquipmentProfileId: null,
   sound: false, unit: 'kg', body: 'male'
@@ -55,6 +56,61 @@ beforeEach(() => {
   harness.stopRest.mockReset()
   harness.openSheet.mockReset()
   harness.toast.mockReset()
+})
+
+describe('body-weight prompt preference at workout start', () => {
+  it.each([
+    ['legacy state without the preference', undefined],
+    ['preference enabled', true]
+  ])('keeps the required check-in for %s', (_label, preference) => {
+    if (preference !== undefined) harness.S.askBodyweightBeforeWorkout = preference
+
+    startFlow(null)
+
+    expect(harness.openSheet).toHaveBeenCalledTimes(1)
+    expect(harness.openSheet.mock.calls[0][1]).toEqual({ locked: true })
+    expect(harness.S.active).toBeNull()
+    expect(harness.nav).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['a planned routine', 'push'],
+    ['a freestyle workout', null]
+  ])('starts %s immediately when the check-in is disabled', (_label, routineId) => {
+    const existingMeasurements = [{ d: '2026-09-17', w: 78.4, t: 1 }]
+    harness.S.askBodyweightBeforeWorkout = false
+    harness.S.bodyweight = structuredClone(existingMeasurements)
+    harness.S.routines = [{ id: 'push', name: 'Push', ex: [] }]
+
+    startFlow(routineId)
+
+    expect(harness.openSheet).not.toHaveBeenCalled()
+    expect(harness.S.active).toMatchObject({
+      routineId,
+      name: routineId ? 'Push' : 'Freestyle',
+      bw: null,
+      entries: []
+    })
+    expect(harness.S.bodyweight).toEqual(existingMeasurements)
+    expect(harness.stopRest).toHaveBeenCalledTimes(1)
+    expect(harness.nav).toHaveBeenCalledWith('/workout')
+  })
+
+  it('uses the check-in again after the preference is re-enabled', () => {
+    harness.S.askBodyweightBeforeWorkout = false
+    startFlow(null)
+    expect(harness.S.active).not.toBeNull()
+
+    harness.S.active = null
+    harness.S.askBodyweightBeforeWorkout = true
+    harness.openSheet.mockClear()
+    harness.nav.mockClear()
+    startFlow(null)
+
+    expect(harness.openSheet).toHaveBeenCalledTimes(1)
+    expect(harness.S.active).toBeNull()
+    expect(harness.nav).not.toHaveBeenCalled()
+  })
 })
 
 describe('workout completion weight review', () => {

@@ -5,10 +5,33 @@ import { progressionConfigSignature } from './progression-scope.js'
 
 const defaults = {
   routines: [], workouts: [], exWeights: {}, progressionWeights: {},
-  equipmentProfiles: [], activeEquipmentProfileId: null
+  equipmentProfiles: [], activeEquipmentProfileId: null,
+  askBodyweightBeforeWorkout: true
 }
 
 describe('state storage compatibility', () => {
+  it('defaults legacy profiles to the body-weight check-in and preserves an explicit opt-out', () => {
+    let legacyPersisted
+    const legacy = loadStoredState({
+      getItem: () => JSON.stringify({ routines: [], workouts: [] }),
+      setItem: (_key, value) => { legacyPersisted = JSON.parse(value) }
+    }, 'state', defaults)
+
+    expect(legacy.askBodyweightBeforeWorkout).toBe(true)
+    expect(legacyPersisted.askBodyweightBeforeWorkout).toBe(true)
+
+    let optOutPersisted
+    const optedOut = loadStoredState({
+      getItem: () => JSON.stringify({
+        routines: [], workouts: [], askBodyweightBeforeWorkout: false
+      }),
+      setItem: (_key, value) => { optOutPersisted = JSON.parse(value) }
+    }, 'state', defaults)
+
+    expect(optedOut.askBodyweightBeforeWorkout).toBe(false)
+    expect(optOutPersisted.askBodyweightBeforeWorkout).toBe(false)
+  })
+
   it('returns a valid normalized profile even when persisting its backfill fails', () => {
     const raw = JSON.stringify({
       routines: [{ id: 'day-a', ex: [{ id: 'bench', sets: 3, reps: 8, weight: 70 }] }],

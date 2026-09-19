@@ -2022,3 +2022,138 @@ Gate aggiuntivi:
    recupero dal proprio `progressionId`.
 7. Ripetere con una strategia Linear/Double nella routine più leggera: la prescrizione successiva
    non deve adottare il record della routine pesante.
+
+---
+
+## 13. Preferenza per la richiesta del peso all'avvio dell'allenamento
+
+### 13.1 Requisito e comportamento consegnato
+
+In **Impostazioni > Avvio allenamento** è disponibile lo switch **Richiedi il peso corporeo**.
+
+- Lo switch è attivo per impostazione predefinita: il comportamento già noto non cambia e prima
+  di un nuovo allenamento viene mostrato il check-in del peso.
+- Se lo switch viene disattivato, routine pianificate e allenamenti freestyle partono subito.
+- In modalità disattivata non viene creata né riutilizzata una misurazione: lo snapshot del nuovo
+  workout contiene `bw: null`.
+- Lo storico delle misurazioni e i workout già salvati non vengono modificati.
+- La registrazione manuale del peso rimane sempre disponibile.
+- Riattivando lo switch, il check-in torna dal successivo avvio.
+- Riprendere un allenamento già attivo non mostra il check-in, indipendentemente dalla preferenza,
+  perché non si tratta dell'avvio di un nuovo workout.
+
+Il testo della Home senza misurazioni è stato reso neutro: non afferma più che il peso venga
+chiesto sempre, dato che ora il comportamento è configurabile.
+
+### 13.2 Modello dati, persistenza e compatibilità
+
+La preferenza è salvata nello stato utente come booleano:
+
+```json
+{
+  "askBodyweightBeforeWorkout": true
+}
+```
+
+Il default è `true`. La lettura operativa usa la regola difensiva `!== false`, quindi un vecchio
+JSON, un backup o uno stato server che non contiene ancora il campo conserva il comportamento
+precedente. Non è necessaria alcuna migrazione manuale.
+
+Il campo segue gli stessi percorsi persistenti del resto delle impostazioni:
+
+1. localStorage e refresh del browser;
+2. sincronizzazione del profilo con il server;
+3. mirror persistente dell'app mobile;
+4. export e import dei backup JSON;
+5. restart dell'applicazione o Docker down/up.
+
+Un valore esplicito `false` prevale sul default e viene mantenuto nei round-trip; l'assenza del
+campo viene invece normalizzata a `true`.
+
+### 13.3 Copertura dei punti di avvio
+
+La decisione è applicata nella funzione centrale `startFlow`, condivisa da:
+
+- pulsante Avvia della Home;
+- pulsante centrale della tab bar;
+- routine prevista per oggi;
+- selezione di una routine diversa;
+- allenamento freestyle.
+
+Non sono stati introdotti rami duplicati nelle singole schermate. Con preferenza OFF viene usato
+lo stesso percorso già esistente di **Inizia senza pesarti**, evitando differenze nella creazione
+dello snapshot, nel timer o nella navigazione.
+
+### 13.4 Test automatici specifici
+
+Comando riproducibile:
+
+```powershell
+cd frontend
+npm.cmd test -- --run src/views/Settings.test.jsx `
+  src/workout-lifecycle.integration.test.jsx src/lib/state-storage.test.js
+```
+
+```text
+Test Files  3 passed (3)
+Tests       18 passed (18)
+Failed      0
+```
+
+Gli scenari aggiunti verificano:
+
+1. stato legacy senza la nuova proprietà: check-in mostrato e non chiudibile accidentalmente;
+2. preferenza esplicitamente attiva: stesso comportamento;
+3. preferenza disattiva con routine pianificata: avvio immediato e `bw: null`;
+4. preferenza disattiva con freestyle: avvio immediato e `bw: null`;
+5. nessuna apertura del foglio del peso quando la preferenza è OFF;
+6. nessuna modifica alle misurazioni corporee già presenti;
+7. timer precedente fermato e navigazione normale alla sessione;
+8. riattivazione della preferenza: il check-in torna al nuovo avvio;
+9. normalizzazione e persistenza a `true` di un vecchio JSON senza campo;
+10. round-trip persistente di un opt-out esplicito a `false`;
+11. rendering dello switch ON con stato legacy e OFF con opt-out esplicito;
+12. presenza di ruolo, stato e nome accessibile sul controllo UI.
+
+### 13.5 No-regression e gate di rilascio
+
+Regressione completa:
+
+```powershell
+cd frontend
+npm.cmd test -- --run
+```
+
+```text
+Test Files  35 passed (35)
+Tests       617 passed (617)
+Failed      0
+```
+
+Gate aggiuntivi:
+
+- build Vite di produzione: **SUPERATA**, 123 moduli trasformati;
+- locale check: **SUPERATO**, 11 lingue con 846 chiavi ciascuna;
+- controllo di tutti i punti di ingresso di `startFlow`: **SUPERATO**;
+- accessibilità: lo switch espone ruolo, stato e nome accessibile tradotto;
+- warning Vite sui chunk oltre soglia: preesistente, non bloccante e non collegato al requisito.
+
+### 13.6 Replica manuale
+
+1. Aprire **Impostazioni > Avvio allenamento**.
+2. Verificare che **Richiedi il peso corporeo** sia attivo su uno stato precedente
+   all'introduzione della feature.
+3. Disattivarlo, ricaricare la pagina e verificare che resti disattivato.
+4. Avviare una routine dalla Home: il workout deve aprirsi senza chiedere il peso.
+5. Terminare o scartare il test, quindi ripetere dalla tab bar, scegliendo un'altra routine e con
+   un freestyle.
+6. Verificare che lo storico del peso non contenga una nuova misura automatica e che quelle
+   esistenti siano invariate.
+7. Con un workout già attivo, cambiare la preferenza e premere **Riprendi**: la sessione corrente
+   deve essere soltanto riaperta, senza un nuovo check-in o un nuovo snapshot.
+8. Riattivare la preferenza e avviare un nuovo workout: deve ricomparire il pannello con
+   **Salva e inizia allenamento** e **Inizia senza pesarti**.
+9. Se si usa un profilo sincronizzato, attendere il sync, ricaricare o riavviare il container e
+   verificare che il valore scelto sia ancora presente.
+10. Esportare un backup con lo switch OFF, reimportarlo in un ambiente di prova e verificare che
+    resti OFF; importare anche un backup legacy senza il campo e verificare il default ON.

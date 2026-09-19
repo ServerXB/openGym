@@ -1279,6 +1279,13 @@ export function WorkoutRow({ w, onClick }) {
 
 /* ============================ workout lifecycle ============================ */
 export function startFlow(routineId) {
+  // Missing means enabled so legacy local/server/mobile state keeps the behaviour it had.
+  // Disabled is exactly the existing "start without weighing in" path: no synthetic
+  // measurement is written and the new workout records an explicit null snapshot.
+  if (S().askBodyweightBeforeWorkout === false) {
+    beginWorkout(routineId, null)
+    return
+  }
   bwSheet({ required: true, onDone: bw => beginWorkout(routineId, bw) })
 }
 export function beginWorkout(routineId, bw) {
