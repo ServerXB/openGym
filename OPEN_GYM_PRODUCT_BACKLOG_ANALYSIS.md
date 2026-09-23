@@ -1,16 +1,18 @@
 # openGym — Analisi funzionale e architetturale del backlog prodotto
 
-- Data: 2026-09-08
+- Data: 2026-09-23
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Stato: Release A implementata e validata; Release B requisiti 1, 5 e 12 implementati e validati; Release C requisito 7 implementato e validato
-- Ambito: requisiti 1–12 comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: profili attrezzatura, solver deterministico e snapshot immutabili del carico
-- Priorità di sviluppo: validate dall'utente; requisiti 8 e 9 esclusi dallo sviluppo corrente
+- Revisione del codice verificata: `1963555`
+- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12 e 14; per 7A il commit dedicato è intenzionalmente ancora pendente
+- Ambito: requisiti 1–14 e relativa estensione 7A comunicati dopo l'implementazione Confirmed Rep-Range
+- Ultimo aggiornamento funzionale: cavo a pacco pesi e cavo caricato a dischi distinti, con guida esplicita per punto/lato
+- Ultimo aggiornamento backlog: estensione 7A implementata e validata, pronta per il commit dedicato
+- Priorità di sviluppo: il primo requisito non completato nell'ordine approvato resta 2A; il requisito 13 non è ancora autorizzato allo sviluppo; i requisiti 8 e 9 restano esclusi
 
 ## 1. Obiettivo
 
-Questo documento trasforma i dodici appunti in requisiti verificabili, separando:
+Questo documento trasforma i quattordici requisiti raccolti in specifiche verificabili, separando:
 
 - difetti già presenti;
 - nuove funzionalità locali;
@@ -24,20 +26,58 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 
 ## 2. Risultato sintetico dell'analisi
 
-| ID | Requisito | Riscontro | Priorità | Dimensione |
-|---|---|---|---|---|
-| 1 | Nascondere peso nel corpo libero | Implementato e validato: tre modalità di carico, zero-load invariants e disclosure zavorra | P1 | Media |
-| 2 | Sincronizzare timer e orologio | Timer locale già basato su deadline; controllo smartwatch richiede fondazione e companion | P2 | Grande/Epic |
-| 3 | Esporre e documentare API | Esistono endpoint interni, non una API pubblica sicura/versionata | P2 | Grande |
-| 4 | Scorrere tra routine | Navigazione attuale richiede ritorno alla lista | P1 | Media |
-| 5 | Auto-riduzione recupero attiva di default | Implementato e validato solo sugli eventi di nuova selezione; decoder legacy invariato | P1 | Piccola |
-| 6 | Istanze dello stesso esercizio | Implementato e validato: slot stabili, gruppi compatibili, snapshot e reader legacy | P0 | Grande |
-| 7 | Calcolo attrezzatura/piastre | Implementato e validato: profili, override slot, solver esatto, snapshot e guida accessibile | P2 | Grande |
-| 8 | Peso da Withings | Fattibile in lettura; OAuth/polling server-side | P3 | Grande |
-| 9 | Dati Polar Flow | Fattibile solo come arricchimento in lettura | P3 | Grande |
-| 10 | Alias esercizi | Nuova funzione locale e sincronizzabile | P1 | Media |
-| 11 | Adattamento dopo modifiche manuali | Implementato e validato: livello dimostrato, outcome, serie opzionali e carico uniforme | P0 | Grande |
-| 12 | Orario/data inizio e fine | Implementato e validato: lifecycle deterministico, UI localizzata, import e legacy | P1 | Piccola/Media |
+| ID | Requisito | Stato | Riscontro | Priorità | Dimensione |
+|---|---|---|---|---|---|
+| 1 | Nascondere peso nel corpo libero | **Completato** | Tre modalità di carico, invarianti a peso zero e disclosure zavorra | P1 | Media |
+| 2 | Sincronizzare timer e orologio, epic complessiva | **Non completato** | Nessuna delle tre fasi sottostanti soddisfa ancora integralmente i propri criteri di rilascio | P2 | Grande/Epic |
+| 2A | Timer locale persistente e deterministico | **Non completato** | Esiste la fondazione a deadline, ma il timer è in memoria e si perde al refresh | P1 | Media |
+| 2B | Timer persistente server e multi-device | **Non completato** | Il server usa una `Map` in RAM, senza record revisionato o ripristino dopo restart | P2 | Grande |
+| 2C | Controllo da smartwatch | **Non completato** | Non esistono companion, pairing o comandi bidirezionali watchOS/Wear OS | P2 | Grande |
+| 3 | Esporre e documentare API | **Non completato** | Esistono endpoint interni, non una API pubblica sicura, versionata e documentata | P2 | Grande |
+| 4 | Scorrere tra routine | **Non completato** | La navigazione richiede ancora il ritorno alla lista | P1 | Media |
+| 5 | Auto-riduzione recupero attiva di default | **Completato** | Attiva sulle nuove selezioni Confirmed; decoder legacy intenzionalmente invariato | P1 | Piccola |
+| 6 | Istanze dello stesso esercizio | **Completato** | Slot stabili, gruppi compatibili, snapshot, reader legacy e fix del riepilogo fine esercizio | P0 | Grande |
+| 7 | Calcolo attrezzatura/piastre | **Completato** | Profili, override slot, solver, modalità manuale per lato, snapshot e guida accessibile | P2 | Grande |
+| 7A | Cavi caricati a dischi | **Completato** | Preset guidato, distinzione pacco pesi/dischi, uno o due punti, guida totale/per punto e nessun rapporto pulegge implicito; commit dedicato pendente | P1 | Piccola/Media |
+| 8 | Peso da Withings | **Non completato** | Fattibilità analizzata; OAuth/polling server-side non implementati e requisito fuori scope corrente | P3 | Grande |
+| 9 | Dati Polar Flow | **Non completato** | Fattibilità analizzata; nessuna integrazione AccessLink e requisito fuori scope corrente | P3 | Grande |
+| 10 | Alias esercizi | **Non completato** | Non esistono ancora alias utente, editor e ricerca centralizzata | P1 | Media |
+| 11 | Adattamento dopo modifiche manuali | **Completato** | Livello dimostrato, outcome, serie opzionali e carico uniforme implementati e verificati | P0 | Grande |
+| 12 | Orario/data inizio e fine | **Completato** | Lifecycle deterministico, UI localizzata, import e lettura legacy | P1 | Piccola/Media |
+| 13 | Riscaldamento specifico guidato | **Non completato** | Analisi funzionale pronta; sviluppo non ancora autorizzato | P1 proposta | Media |
+| 14 | Richiesta del peso corporeo configurabile | **Completato** | Switch persistente nelle Impostazioni; opt-out salta il popup senza alterare le misurazioni | P1 | Piccola |
+
+`Completato` significa che lo scope concordato è presente nel codice ed è coperto da test
+automatici. La colonna `Commit principale` distingue ciò che è già committato dallo stato
+transitorio “pronto per il commit”; 7A è in questo stato perché è stato richiesto di fermarsi
+prima di ogni commit. `Non completato` resta il valore anche quando esiste una fondazione
+parziale: in questo modo la colonna risponde in modo binario alla domanda “è implementato o no?”.
+I collaudi manuali su CasaOS, dispositivi fisici, screen reader e provider reali restano gate
+separati e non vengono confusi con lo stato dell'implementazione.
+
+### 2.1 Evidenze dell'audit di implementazione
+
+Audit aggiornato il 2026-09-23 sulla revisione `1963555` più il working tree 7A pronto per il
+commit. La regressione automatica corrente è verde: **37/37 file di test e 635/635 test**; anche
+la build Vite di produzione termina con
+successo. Resta il warning non bloccante già noto sui chunk di grandi dimensioni.
+
+| ID | Commit principale | Evidenza verificata |
+|---|---|---|
+| 1 | `e63972b` | `exercise-load-mode.js`, prescrizione/storico/workout e relativi test |
+| 5 | `e121e7d` | default configurazione Confirmed, integrazione e auto-rest |
+| 6 | `37127be`, hardening `5cd46bb` | `progression-scope.js`, snapshot, storico e isolamento tra routine/giorni |
+| 7 | `ebf93f8`, estensione `75c741e` | `equipment-load.js`, `EquipmentGuide.jsx`, profili, snapshot e test solver/UI |
+| 7A | commit dedicato pendente | preset cavo, meccanismo esplicito, formula per punto, snapshot/legacy, copy/accessibilità e smoke browser a 320 px |
+| 11 | `2ba04d0` | `progression.js`, `workout-set-status.js` e matrice Confirmed 4×8–10 |
+| 12 | `a438f11` | `workout-time.js`, lifecycle, import e rendering storico |
+| 14 | `1963555` | setting persistente, compatibilità legacy e start flow pianificato/freestyle |
+
+Per i requisiti non completati l'audit ha verificato anche l'assenza dello scope richiesto, non
+soltanto la mancanza di un'etichetta nel backlog: 2A non persiste il timer, 2B non ha stato server
+duraturo, 2C non ha companion, 3 non ha contratto API pubblico, 4 non ha rail, 10 non ha alias
+utente, 8/9 non hanno provider e 13 non ha
+ancora motore o popup.
 
 Le correzioni 6 e 11 sono state affrontate prima del requisito 7 perché decidono quale storico
 appartiene a una prescrizione. Questo ha permesso di aggiungere l'attrezzatura per slot senza
@@ -50,6 +90,7 @@ Identità slot/progressione (6)
 ├── risultati manuali e Confirmed (11)
 ├── reset e recupero per istanza (5)
 └── attrezzatura scelta per slot (7)
+    └── riscaldamento specifico e carichi praticabili (13)
 
 Timestamp completi (12)
 └── collegamento temporale workout ↔ Polar (9)
@@ -63,7 +104,9 @@ Timer locale persistente (2A)
 ```
 
 I punti 1, 4 e 10 possono procedere in parallelo dopo avere fissato il modello dello slot. Il
-punto 5 è un quick win, purché non cambi il significato dei vecchi JSON.
+punto 5 è un quick win, purché non cambi il significato dei vecchi JSON. Il punto 13 può iniziare
+solo dopo i punti 1, 6, 7 e 11, già necessari per conoscere senza ambiguità carico, attrezzo,
+occorrenza e prossima serie allenante del workout attivo.
 
 ## 4. Principi trasversali
 
@@ -169,6 +212,12 @@ Il requisito può significare tre cose differenti e non vanno confuse:
 1. il countdown openGym deve restare corretto quando il telefono sospende la pagina o cambia tab;
 2. lo stesso countdown deve comparire su più tab/dispositivi;
 3. il countdown deve apparire o essere controllabile da smartwatch/app Orologio.
+
+| Fase | Stato | Verifica |
+|---|---|---|
+| 2A — timer locale | **Non completato** | Deadline già presente, ma nessuna persistenza su refresh/restart, revisione o sync fra tab |
+| 2B — server/multi-device | **Non completato** | Timer push soltanto in RAM e nessun modello di conflitto/ripristino |
+| 2C — smartwatch | **Non completato** | Nessun companion o controllo bidirezionale implementato |
 
 #### Stato attuale
 
@@ -421,18 +470,19 @@ completati e non legge le future sessioni dell'altro ramo.
 
 Dettagli, comandi e risultati sono registrati in `OPEN_GYM_RELEASE_TEST_REPORT.md`.
 
-#### Esito: problema confermato
+#### Problema originario — risolto
 
-Oggi l'identità della progressione è il solo `exerciseId`:
+Prima della Release A l'identità della progressione era il solo `exerciseId`:
 
-- le entry della routine non hanno un ID stabile dell'occorrenza;
-- `lastEntryFor`, `sessionsFor` e Confirmed cercano `e.id === exerciseId`;
-- `exWeights` è globale per esercizio;
-- recovery reset e control sono globali per esercizio;
-- con due occorrenze nello stesso workout `.find(...)` usa soltanto la prima.
+- le entry della routine non avevano un ID stabile dell'occorrenza;
+- `lastEntryFor`, `sessionsFor` e Confirmed cercavano `e.id === exerciseId`;
+- `exWeights`, recovery reset e control erano globali per esercizio;
+- con due occorrenze nello stesso workout `.find(...)` poteva usare soltanto la prima.
 
-Riferimenti: `frontend/src/lib/history.js:166-228`, `frontend/src/lib/progression.js:184-191`,
-`frontend/src/lib/progression.js:236-245` e `frontend/src/lib/confirmedRepRangeRest.js:11-20`.
+La correzione usa ora `routineExerciseId` e `progressionId` in `progression-scope.js`,
+`workout-scope.js`, `history.js`, `progression.js`, `workout-records.js` e
+`confirmedRepRangeRest.js`. L'hardening successivo impedisce inoltre al riepilogo di fine
+esercizio di precompilare il record globale appartenente a un'altra routine o giornata.
 
 Esempio problematico:
 
@@ -441,11 +491,11 @@ Routine A: Panca 3×8–12, 70 kg, Confirmed
 Routine B: Panca 5×3–5, 100 kg, Linear
 ```
 
-Il carico e parte dello storico della routine più recente possono diventare la baseline
-dell'altra. Con due Panche nella stessa routine, progressione e best possono persino leggere
-occorrenze differenti.
+Il carico e parte dello storico della routine più recente potevano diventare la baseline
+dell'altra. Con due Panche nella stessa routine, progressione e best potevano persino leggere
+occorrenze differenti. I test di isolamento introdotti con la Release A coprono entrambi i casi.
 
-#### Modello raccomandato
+#### Modello implementato
 
 Separare:
 
@@ -644,16 +694,196 @@ modificato nelle impostazioni.
 - workout legacy senza snapshot;
 - contrasto e comprensione del messaggio senza colore.
 
-Risultato corrente: **97 test mirati superati**, **593 test complessivi superati**, build Vite
-riuscita, 11 locale sincronizzate e contrasto success misurato a **6,51:1** nel tema scuro e
+Risultato corrente dopo l'estensione 7A: **129 test mirati superati**, **635 test complessivi
+superati**, build Vite riuscita, 11 locali sincronizzate con 873 chiavi ciascuna e contrasto
+success misurato a **6,51:1** nel tema scuro e
 **5,15:1** nel tema chiaro. Refresh/storage, export/import, cambio profilo prima/durante/dopo,
 stesso esercizio in progression group diversi, corpo libero, unità discordanti e inventari
 impossibili sono coperti automaticamente. Il solver coincide inoltre con un enumeratore
 brute-force indipendente su **2.000 casi deterministici**. Un controllo riproducibile in Edge
-headless a 320 px ha verificato schermate, editor dell'attrezzo, assenza di overflow, guida
-esatta, semantica accessibile e temi chiaro/scuro. Docker/CasaOS, due browser autenticati, screen
+headless a 320 px, esteso e rieseguito in Chromium 153, ha superato **29/29 controlli** su
+schermate, cambio del meccanismo, editor dell'attrezzo, assenza di overflow, guida esatta,
+semantica accessibile e temi chiaro/scuro. Docker/CasaOS, due browser autenticati, screen
 reader e dispositivo fisico restano gate manuali esplicitati nel report, perché dipendono
 dall'ambiente reale.
+
+#### Estensione 7A — Cavi caricati a dischi e guida per punto/lato
+
+**Stato: Completato e validato il 2026-09-23; commit dedicato pendente per lo stop concordato.**
+
+##### Esito dell'implementazione
+
+- L'editor espone `Macchina a cavo` come tipo guidato e obbliga a scegliere tra `Pacco pesi` e
+  `Dischi sui perni`.
+- Il pacco pesi riusa `machine_stack`; il cavo a dischi riusa `plate_loaded_machine`. Non sono
+  stati aggiunti nuovi `kind`, campi persistenti obbligatori o migrazioni di schema.
+- Per il cavo a dischi la UI usa `Punti da caricare`, permette uno o due punti e considera
+  facoltativo l'inventario dei dischi.
+- La guida calcola `(target - tara) / punti`, mostra target totale, massa totale dei dischi e
+  carico fisico per punto. Dichiara sempre che il rapporto delle pulegge non è applicato.
+- Il selettore dell'esercizio e l'elenco del profilo mostrano il meccanismo, così la scelta resta
+  comprensibile anche dopo la chiusura dell'editor.
+- Se più attrezzi corrispondono a `cable`, il resolver resta intenzionalmente ambiguo e richiede
+  una scelta esplicita dello slot.
+- Profili, workout attivi e workout conclusi mantengono gli snapshot già previsti dal requisito
+  7: modificare tara, punti o attrezzo influenza soltanto workout futuri.
+
+La copertura aggiunta comprende 18 test automatici nuovi nel totale di suite, 129 test mirati
+di dominio/integrazione/UI, la regressione completa da 635 test, build, locale check, 2.000
+confronti brute-force del solver e 29 controlli browser reali a 320 px.
+
+##### Problema originario e comportamento precedente
+
+`cable` nel catalogo identifica la categoria dell'esercizio, non il meccanismo fisico della
+macchina. Un cavo può essere:
+
+- selectorized, con pacco pesi e perno di selezione;
+- plate-loaded, con dischi applicati a uno o due perni/punti di carico;
+- composto da due torri indipendenti;
+- soggetto a un rapporto di pulegge che non coincide necessariamente con il peso fisicamente
+  caricato.
+
+Prima della 7A `machine_stack` trattava correttamente i valori selezionabili del pacco pesi.
+`plate_loaded_machine` sa già sottrarre la tara e dividere il residuo su uno o due punti, anche
+senza censire l'inventario dei dischi. Il limite era soprattutto di UX e configurazione: non
+esisteva un preset chiamato `Cavo caricato a dischi`, la voce `Cavo` poteva quindi essere
+associata al pacco pesi e l'utente non vedeva subito quale meccanismo sarebbe stato usato.
+
+Non si deve dedurre il meccanismo da `exercise.eq === "cable"`: due esercizi al cavo, o lo stesso
+esercizio in due palestre, possono usare macchine differenti.
+
+##### Decisione UX/UI raccomandata
+
+Nell'editor del profilo attrezzatura aggiungere un flusso guidato:
+
+```text
+Attrezzo: Cavo
+
+Come si carica?
+( ) Pacco pesi con selettore
+(•) Dischi su perni
+
+Punti da caricare
+[ Uno ] [ Due ]
+
+Peso/resistenza a vuoto: 0 kg
+Il peso registrato indica: Totale della macchina
+
+Inventario dischi (facoltativo)
+```
+
+Le due scelte sono preset UX, non due interpretazioni nascoste dello stesso dato:
+
+- `Pacco pesi con selettore` crea/configura un `machine_stack`;
+- `Dischi su perni` riusa `plate_loaded_machine`, imposta il match catalogo `cable` e mostra
+  `Punti da caricare` al posto del più ambiguo `Lati da caricare`;
+- per i profili e JSON esistenti non cambia nulla;
+- se nello stesso profilo esistono sia un cavo a pacco pesi sia uno a dischi, l'associazione
+  automatica deve fermarsi come ambigua e l'esercizio deve far scegliere l'attrezzo esplicito.
+
+Nella configurazione del singolo esercizio, il selettore `Attrezzatura di carico` deve rendere
+visibile il meccanismo già nel nome o in un badge:
+
+```text
+Cavo Technogym        · Pacco pesi
+Cavo plate-loaded     · Dischi · 2 punti
+```
+
+Subito sotto va mostrata un'anteprima numerica, per esempio `Target 60 kg → 30 kg per lato`.
+Questo evita di scoprire la convenzione soltanto durante il workout.
+
+Durante l'esecuzione non serve un nuovo popup: è preferibile estendere la guida verde già
+presente sopra la prossima serie, con etichette complete e senza ellissi:
+
+```text
+Obiettivo registrato: 60 kg
+Cavo plate-loaded · 2 punti di carico
+Carica 30 kg su ciascun lato
+Totale dischi: 60 kg · rapporto pulegge non applicato
+```
+
+Con una tara/resistenza a vuoto di 10 kg lo stesso obiettivo deve mostrare `25 kg per lato`.
+Con un solo punto deve dire `Carica 50 kg sul perno`, non `per lato`. Se l'inventario dei dischi
+è vuoto, la guida si ferma al valore numerico; se è censito, la composizione può comparire in una
+riga secondaria o in un dettaglio espandibile.
+
+##### Convenzione del peso e formula
+
+Per l'MVP la convenzione raccomandata è esplicita e deterministica: il peso registrato in openGym
+è il **totale della macchina**, comprensivo della tara configurata. La formula è:
+
+```text
+carico per punto = (peso registrato - tara) / numero di punti da caricare
+```
+
+Questa assunzione deve essere visibile sia nell'editor sia nella guida; non può restare implicita.
+I vecchi `plate_loaded_machine` mantengono la semantica `total`, quindi non servono migrazioni.
+
+Se l'utente registra invece il peso **già per lato/torre**, servirà una futura semantica esplicita
+`per_loading_point`; non va simulata moltiplicando o dividendo silenziosamente lo storico. Fino a
+quando quella variante non è implementata, il caso deve usare un'istruzione manuale.
+
+Il rapporto delle pulegge non viene stimato nella 7A: numero di dischi, massa fisica caricata e
+resistenza alla maniglia non sono equivalenti su tutte le macchine. Un'eventuale conversione
+richiederà un rapporto dichiarato dall'utente o dal produttore, snapshotato nel workout. In sua
+assenza la UI deve dire `rapporto pulegge non applicato`, non presentare il risultato come forza
+effettiva.
+
+##### Modello dati e backward compatibility
+
+Il caso base riusa il modello già leggibile dal sistema:
+
+```json
+{
+  "id": "cable-plate-loaded",
+  "kind": "plate_loaded_machine",
+  "label": "Cavo plate-loaded",
+  "catalogEquipment": "cable",
+  "tareWeight": 0,
+  "sideCount": 2,
+  "denominations": []
+}
+```
+
+`sideCount` resta il nome persistito per compatibilità; la UI lo presenta come `Punti da
+caricare`. Il profilo e la scelta per slot continuano a essere congelati in
+`equipmentSnapshot`/`equipmentUse`, quindi un cambio palestra non modifica workout attivi o
+terminati. Non è necessario introdurre un nuovo `kind` né riscrivere lo storico per il caso
+totale a uno/due punti.
+
+##### Criteri di accettazione e test
+
+1. Il preset `Cavo · Pacco pesi` continua a mostrare il valore da selezionare, mai `per lato`.
+2. `Cavo · Dischi`, target 60, tara 0 e due punti mostra 30 kg per lato.
+3. Target 60, tara 10 e due punti mostra 25 kg per lato.
+4. Target 60, tara 10 e un punto mostra 50 kg sul perno senza usare la parola `lato`.
+5. Inventario vuoto produce comunque il calcolo aritmetico esatto, senza chiedere di censire i
+   dischi.
+6. Inventario presente aggiunge la composizione senza cambiare target o progressione.
+7. Pacco pesi e plate-loaded entrambi associati a `cable` richiedono una scelta esplicita per lo
+   slot e non usano il primo match trovato.
+8. Lo stesso esercizio in routine/giorni diversi può usare due cavi differenti senza contaminare
+   attrezzo, peso, guida o snapshot.
+9. Cambio profilo o tara influenza soltanto workout avviati successivamente.
+10. Target sotto tara, numero di punti invalido, unità discordanti e attrezzo rimosso producono
+    un messaggio sicuro, non un valore inventato.
+11. La guida dichiara che il rapporto pulegge non è applicato e non chiama il valore `resistenza
+    effettiva`.
+12. Preview e guida sono leggibili a 320 px, con tastiera/screen reader, tema chiaro/scuro e senza
+    label troncate con `...`.
+
+Test richiesti: normalizzazione preset, mapping ambiguo, formula uno/due punti, tara zero/non
+zero, inventario assente/presente, snapshot e isolamento slot, round-trip JSON legacy, anteprima
+configurazione, copy/accessibilità della guida e regressione completa del solver esistente.
+
+##### Configurazione dopo la 7A
+
+Nel profilo attrezzatura selezionare `Macchina a cavo`, quindi `Dischi sui perni`. Impostare la
+resistenza a vuoto e uno o due punti da caricare; l'inventario può restare vuoto. Se il profilo
+contiene più cavi associati alla stessa categoria, nella configurazione dello specifico esercizio
+scegliere esplicitamente l'attrezzo desiderato. La guida del workout mostrerà il target totale,
+quanto caricare su ogni punto e la massa totale dei dischi, senza convertire il rapporto delle
+pulegge.
 
 ### 5.8 Recupero del peso da Withings
 
@@ -1145,12 +1375,281 @@ persistenza JSON/storage, import date-only/minute/second/millisecond, ISO con of
 DST inesistente, fine il giorno successivo, date invalide, legacy e dati corrotti. Build, lingue e
 diff sono inclusi nel report di rilascio; i gate browser/CasaOS reali restano manuali.
 
+### 5.13 Riscaldamento specifico guidato verso la serie allenante
+
+#### Stato e obiettivo
+
+Nuovo requisito di backlog, **non ancora implementato**.
+
+Durante l'esecuzione di un esercizio compatibile, l'utente deve poter richiamare manualmente un
+popup **Riscaldamento** che costruisce una sequenza progressiva verso la prossima serie allenante.
+La guida deve mostrare senza ambiguità:
+
+- percentuale e ripetizioni di ogni tappa;
+- carico teorico e, quando noto, carico realmente utilizzabile;
+- peso totale;
+- tara e peso da aggiungere per lato/punto di carico;
+- peso del singolo manubrio e quantità di manubri;
+- composizione delle piastre soltanto se l'inventario è stato censito;
+- serie allenante di destinazione, separata visivamente dalle tappe di riscaldamento.
+
+Si tratta del **riscaldamento specifico al carico dell'esercizio**, non di un programma completo
+di riscaldamento generale, mobilità, riabilitazione o preparazione medica.
+
+**Priorità proposta:** P1. **Dimensione:** media. **Dipendenze:** requisiti 1, 6, 7 e 11.
+
+#### Decisione scientifica e limiti delle evidenze
+
+La letteratura giustifica una preparazione specifica, progressiva e non affaticante, ma non
+identifica una piramide universale valida per tutte le persone e tutti gli esercizi:
+
+- il consenso internazionale 2026 descrive il warm-up come intervento contestuale e
+  individualizzabile, composto da elementi generali e specifici;
+- la review specifica sul resistance training trova risultati eterogenei e pochi studi;
+- studi su squat, panca, leg press e lat pulldown indicano che avvicinarsi al carico allenante con
+  volume contenuto può essere preferibile al solo lavoro molto leggero e voluminoso;
+- altri studi non trovano differenze significative fra protocolli o rispetto al non eseguire un
+  warm-up specifico;
+- i campioni sono soprattutto piccoli gruppi di uomini giovani già allenati e gli esiti sono
+  acuti: non dimostrano che una precisa piramide migliori ipertrofia o forza nel lungo periodo;
+- non esiste evidenza sufficiente per presentare questo calcolatore come garanzia di prevenzione
+  degli infortuni.
+
+Perciò openGym deve chiamare la policy **evidence-informed**, non “scientificamente provata”. Le
+percentuali sono una sintesi prudente, versionata e verificabile. Devono poter essere riviste in
+una nuova versione senza reinterpretare workout o dati passati.
+
+Le serie suggerite devono restare lontane dal cedimento. La UI indica come guardrail almeno
+**4–5 RIR**, nessuna ripetizione lenta o forzata e l'interruzione in caso di dolore o difficoltà
+inattesa. L'app non può misurare automaticamente questi segnali e non deve aumentare il carico per
+“correggerli”.
+
+#### Policy deterministica proposta: `specific_warmup_v1`
+
+Il calcolo usa il carico allenante corrente `W`, non una stima implicita di 1RM. Il numero di
+ripetizioni `R` serve soltanto a scegliere la quantità di ramp-up; non autorizza openGym a
+diagnosticare automaticamente “forza” o “ipertrofia”.
+
+| Profilo neutrale | Condizione | Tappe teoriche | Recupero indicativo |
+|---|---:|---|---|
+| Carico pesante | `R <= 5` | `40% W × 5`, `60% W × 3`, `75% W × 2`, `90% W × 1` | 60 s, 90 s, 120 s; poi 180 s |
+| Carico moderato | `R = 6–12` | `40% W × 6`, `60% W × 4`, `80% W × 2` | 60 s, 90 s; poi 120 s |
+| Carico leggero/alte reps | `R >= 13` | `50% W × 5`, `75% W × 3` | 60 s; poi 90 s |
+
+I recuperi sono suggerimenti, non modificano né avviano automaticamente il timer openGym. Anche
+il vincolo RIR è un guardrail euristico, non una dose universale convalidata.
+
+Invarianti della policy:
+
+1. stesso input e stessa versione producono sempre lo stesso piano;
+2. i carichi sono strettamente crescenti dopo la normalizzazione;
+3. nessuna tappa può essere uguale o superiore a `W`;
+4. le ripetizioni non aumentano salendo di carico;
+5. non vengono prodotti numeri negativi, `NaN` o infiniti;
+6. le tappe duplicate dopo l'arrotondamento vengono fuse, conservando il numero di ripetizioni
+   più alto necessario per la prima tappa equivalente;
+7. se la granularità dell'attrezzo rende inutile una piramide, vengono mostrate meno tappe;
+8. se non esiste alcun carico inferiore a `W`, non viene inventata una tappa: la UI spiega che il
+   carico allenante è già il minimo praticabile;
+9. una tappa non componibile non modifica mai la serie allenante.
+
+Esempio normativo:
+
+```text
+Panca piana — prossima serie allenante: 100 kg × 8
+Bilanciere: 20 kg
+
+1. 6 rip. · 40% · totale 40 kg · 10 kg per lato
+2. 4 rip. · 60% · totale 60 kg · 20 kg per lato
+3. 2 rip. · 80% · totale 80 kg · 30 kg per lato
+──────────────────────────────────────────────────
+Serie allenante · totale 100 kg · 40 kg per lato
+```
+
+#### Sorgente autoritativa del calcolo
+
+Il piano appartiene alla specifica entry del workout attivo. Non deve mai cercare il carico dal
+record globale del solo `exerciseId`, da `exWeights` o da una sessione di un'altra routine.
+
+La destinazione predefinita è la **prima serie prescritta non completata**, risolta con l'identità
+dello slot e il numero di serie prescritte. Le serie opzionali aggiunte durante Confirmed
+Rep-Range non diventano automaticamente la destinazione quando il blocco prescritto è già
+terminato.
+
+Input autoritativi:
+
+- `routineExerciseId`/entry attiva e relativo snapshot target;
+- peso e ripetizioni attualmente visibili nella serie di destinazione;
+- modalità di carico e unità congelate nel workout;
+- `active.equipmentSnapshot` ed `entry.equipmentUse`.
+
+Se l'utente modifica manualmente peso o ripetizioni prima della serie, il popup ricalcola il
+piano e dichiara sempre l'input usato. Se le serie future hanno carichi differenti, mostra quale
+serie è la destinazione e non seleziona silenziosamente il massimo. Duplicati dello stesso
+esercizio, routine diverse e giornate diverse restano isolati tramite l'entry corrente.
+
+#### Attrezzatura, arrotondamento e carico per lato
+
+Ogni tappa teorica deve riusare il resolver e il solver dell'attrezzatura esistenti, senza
+duplicare formule in un nuovo componente.
+
+- **Bilanciere simmetrico:** il target è il peso totale comprensivo della tara; per lato vale
+  `(totale - tara) / 2`.
+- **Bilanciere senza inventario dischi:** mostra comunque totale, tara e peso matematico per lato;
+  la composizione resta manuale e la UI non dichiara che il valore sia esattamente componibile.
+- **Bilanciere con inventario:** scegliere il massimo carico componibile non superiore alla tappa
+  teorica e mostrare la composizione deterministica per lato.
+- **Tappa teorica sotto tara:** usare l'attrezzo vuoto soltanto se resta inferiore a `W`, poi
+  eliminare eventuali duplicati.
+- **Manubrio fisso:** `W` conserva la semantica già decisa di peso del singolo manubrio; mostrare
+  per esempio `2 × 20 kg` e, separatamente, `40 kg totali esterni`.
+- **Manubrio caricabile:** mostrare tara del singolo manico e carico per ciascun lato del singolo
+  manubrio, oltre alla quantità da preparare.
+- **Pacco pesi:** scegliere un valore disponibile non superiore alla tappa teorica.
+- **Macchina plate-loaded:** rispettare tara e uno/due punti di carico dello snapshot.
+- **Attrezzo custom o mapping assente:** mostrare il target teorico e la spiegazione manuale,
+  senza inventare un carico per lato.
+- **Unità discordanti:** non convertire automaticamente kg e lb; mostrare un avviso e omettere la
+  composizione pratica.
+
+Quando esiste un inventario, la preferenza per il valore inferiore limita l'affaticamento e rende
+il risultato riproducibile. Quando l'inventario non esiste, il desiderio dell'utente di comporre
+i dischi manualmente è rispettato: resta disponibile il calcolo aritmetico per lato.
+
+#### Casi non calcolabili in modo sicuro nella v1
+
+- corpo libero puro: non si assume che il peso corporeo equivalga al carico meccanico del gesto;
+- corpo libero zavorrato o esercizio assistito: la sola zavorra non rappresenta in modo affidabile
+  una percentuale del carico totale;
+- bande elastiche: la resistenza non è un peso costante;
+- cardio, serie a tempo, peso nullo o target senza ripetizioni;
+- configurazione con semantica del carico ambigua.
+
+In questi casi openGym non genera chilogrammi fittizi. Mostra una spiegazione breve oppure non
+mostra l'azione finché non esiste un adattatore specifico sicuro.
+
+#### UX/UI del popup
+
+- Azione secondaria con icona e testo visibile **Riscaldamento** dentro l'esercizio attivo.
+- Apertura in una bottom sheet coerente con il resto dell'app; nessun popup automatico.
+- Header con nome esercizio e `Calcolato sulla prossima serie: W × R`.
+- Elenco verticale: numero tappa, reps, percentuale, teorico, praticabile e istruzione di carico.
+- Serie allenante separata graficamente e mai confusa con una tappa preparatoria.
+- Disclosure **Come viene calcolato** con sintesi della policy, limiti e fonti.
+- Avvisi testuali, non affidati solo a colore o icona.
+- Etichette complete su più righe: nessun `...` che nasconda totale, per lato o tara.
+- Dialog nominato, focus confinato e restituito al trigger, chiusura con Escape/Indietro e layout
+  senza overflow a 320 px e con reflow 200%.
+
+L'app non deve dedurre che l'utente sia già riscaldato in base all'ordine, al nome o ai muscoli
+dell'esercizio: openGym non possiede oggi una classificazione compound/isolation né una prova
+affidabile dello stato di preparazione. Il popup è facoltativo e una futura modalità ridotta deve
+essere una scelta esplicita, non un automatismo nascosto.
+
+#### Dati, storico e backward compatibility
+
+Per l'MVP il piano è **derivato e non persistito**. Target, attrezzatura e identità sono già
+congelati nell'active workout; a parità di versione, la stessa funzione pura ricostruisce la
+stessa guida dopo refresh.
+
+Le tappe di riscaldamento:
+
+- non entrano in `entries[].sets`;
+- non modificano volume, PR, stima 1RM, progressione, `topRangeStreak`, recupero adattivo,
+  completezza o statistiche;
+- non vengono copiate nei workout completati e non costituiscono prova di esecuzione;
+- non richiedono campi JSON, migrazioni, modifiche server o riscrittura dello storico;
+- non avviano, fermano o azzerano automaticamente timer e recuperi.
+
+La policy deve avere una costante di versione nel codice e test golden dedicati. Se in futuro si
+vorrà registrare l'esecuzione reale, servirà un array distinto `warmupSets` con snapshot/versione,
+sempre escluso dagli algoritmi delle serie allenanti. Questa estensione non appartiene alla v1.
+
+#### Criteri di accettazione
+
+1. Il popup è richiamabile dall'esercizio attivo senza modificare serie o timer.
+2. Il target dichiarato coincide con la prima serie prescritta non completata dello specifico
+   slot nel workout attivo.
+3. Modificare manualmente quel peso o le reps produce un nuovo piano coerente alla riapertura.
+4. Percentuali, reps e recuperi coincidono con `specific_warmup_v1`.
+5. Le tappe sono deterministiche, crescenti, deduplicate e sempre inferiori al target.
+6. `100 kg × 8` con bilanciere da 20 kg produce 40/60/80 kg totali e 10/20/30 kg per lato.
+7. Senza dischi censiti continua a mostrare il valore numerico per lato.
+8. Con inventario usa soltanto combinazioni disponibili e arrotonda per difetto.
+9. Target vicino alla tara comprime il piano senza valori negativi o serie duplicate.
+10. Il peso del manubrio resta per singolo manubrio; la quantità è mostrata separatamente.
+11. Pacco pesi e macchine non mostrano impropriamente “per lato”.
+12. Kg e lb restano separati; nessuna conversione silenziosa.
+13. Corpo libero, bande, cardio e configurazioni ambigue non producono valori inventati.
+14. Cambiare profilo nelle Impostazioni durante il workout non cambia lo snapshot usato.
+15. Stesso esercizio in routine, giorni o slot diversi usa sempre la propria entry attiva.
+16. Aprire/chiudere il popup non altera input non salvati, focus, timer o stato dell'esercizio.
+17. Il piano non cambia progressione, PR, volume, recupero o outcome Confirmed Rep-Range.
+18. JSON e workout legacy restano leggibili senza migrazione.
+19. Il popup è comprensibile con tastiera/screen reader e a 320 px in entrambi i temi.
+20. La guida di riscaldamento e la guida attrezzatura esistente non possono dare istruzioni
+    contraddittorie per lo stesso carico.
+21. Quando il carico praticabile differisce da quello teorico, il popup mostra entrambi e spiega
+    l'arrotondamento senza modificare il target allenante.
+
+#### Test richiesti
+
+- unit test golden per tutte le soglie `R` e per i valori al confine 5/6/12/13;
+- property test su determinismo, monotonicità, deduplica, numeri finiti e carichi `< W`;
+- kg/lb, decimali, carichi minimi, pareggi e target sotto/vicino alla tara;
+- tutti i tipi di attrezzatura, con/senza inventario e con inventario insufficiente;
+- mapping assente, semantica manuale, unit mismatch e limite del solver;
+- modifica manuale di peso/reps e serie future a carichi differenti;
+- sole serie opzionali residue dopo il blocco prescritto;
+- stesso esercizio in routine/giorni/slot differenti e duplicati nella stessa routine;
+- profilo modificato prima, durante e dopo l'avvio del workout;
+- test espliciti di non mutazione per set, storico, progressione, PR, volume e recupero;
+- fixture legacy, refresh dell'active workout, build e sincronizzazione delle 11 locale;
+- tastiera, screen reader, focus restore, temi, reflow 200% e viewport 320–640 px;
+- gate manuale su dispositivo fisico e CasaOS/Docker.
+
+File probabili: nuovo `frontend/src/lib/warmup.js` con relativo test, nuovo componente
+`frontend/src/components/WarmupGuide.jsx`, `frontend/src/views/Workout.jsx`, `frontend/src/sheets.jsx`,
+`frontend/src/lib/equipment-load.js`, `frontend/src/lib/workout-set-status.js`, `frontend/src/index.css`,
+tutte le locale e i test di integrazione del lifecycle workout.
+
+### 5.14 Richiesta del peso corporeo configurabile all'avvio
+
+#### Stato dell'implementazione
+
+**Completato** nella revisione `1963555`.
+
+Nelle Impostazioni, sezione `Avvio allenamento`, lo switch `Richiedi il peso corporeo` controlla
+il check-in mostrato prima di un nuovo workout:
+
+- attivo: mantiene il comportamento storico e apre il popup bloccante;
+- disattivo: avvia subito sia una routine pianificata sia un workout libero;
+- riattivato: il popup torna dal workout successivo;
+- la registrazione manuale del peso rimane sempre disponibile;
+- saltare il popup non aggiunge, elimina o sostituisce misurazioni e salva `bw: null` nello
+  snapshot del nuovo workout.
+
+La preferenza `askBodyweightBeforeWorkout` appartiene allo stato sincronizzato. I profili e i
+backup legacy che non contengono il campo ricevono `true`, così l'aggiornamento non modifica
+silenziosamente il flusso esistente. Un `false` esplicito sopravvive a storage, backup, sync,
+refresh e restart insieme alle altre impostazioni del profilo.
+
+Evidenze principali: `frontend/src/store/useStore.js`, `frontend/src/views/Settings.jsx`,
+`frontend/src/sheets.jsx`, `frontend/src/views/Home.jsx`, tutte le locale,
+`frontend/src/lib/state-storage.test.js`, `frontend/src/views/Settings.test.jsx` e
+`frontend/src/workout-lifecycle.integration.test.jsx`.
+
+Scenari automatici validati: default legacy attivo, opt-out persistito, accessibilità dello
+switch, avvio immediato routine/freestyle, nessuna mutazione delle misurazioni e riattivazione del
+popup. Il gate manuale residuo è la verifica del flusso su dispositivo/CasaOS reale.
+
 ## 6. Modello dati trasversale consigliato
 
 La forma seguente mostra le nuove responsabilità senza imporre una migrazione immediata:
 
 ```json
 {
+  "askBodyweightBeforeWorkout": true,
   "exerciseAliases": {},
   "equipmentProfiles": [],
   "activeEquipmentProfileId": null,
@@ -1188,6 +1687,10 @@ La forma seguente mostra le nuove responsabilità senza imporre una migrazione i
 }
 ```
 
+Il requisito 13 non aggiunge campi a questo schema nella v1: il piano di riscaldamento è una vista
+derivata dalla specifica `active.entries[]`, dal suo target e da `equipmentSnapshot`. Un eventuale
+futuro tracciamento usa `warmupSets` separato, mai `entries[].sets`.
+
 Token OAuth/PAT, refresh token e segreti provider non appartengono a questo stato sincronizzato:
 devono vivere esclusivamente nel backend.
 
@@ -1213,29 +1716,39 @@ Definizioni:
 
 ### Ordine raccomandato dei requisiti
 
-| Ordine | ID originale | Priorità | Requisito | Motivo dell'ordine | Dipende da |
-|---:|---:|---|---|---|---|
-| 1 | 6 | P0 | Identità delle istanze tra routine | Evita contaminazioni di peso, target, streak e recupero fra configurazioni differenti | — |
-| 2 | 11 | P0 | Validare il livello realmente completato (`RF-11.1`) | Corregge direttamente le prescrizioni, compreso lo storico 8/9 eseguito a 10 | 6 |
-| 3 | 1 | P1 | Corpo libero puro senza campi peso | Rimuove un'ambiguità frequente e impedisce carichi invisibili recuperati dallo storico | 6, distinzione puro/zavorrato |
-| 4 | 5 | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed — completato | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
-| 5 | 12 | P1 | Mostrare e qualificare data/ora di inizio e fine — completato | Lifecycle deterministico, storico leggibile e base temporale per linking esterno | — |
-| 6 | 2A | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
-| 7 | 4 | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
-| 8 | 10 | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
-| 9 | 7 | P2 | Profili attrezzatura, solver e snapshot — completato | Profili per palestra, singolo manubrio, inventario, guida accessibile e nessuna retroattività | 1, 6, snapshot workout |
-| 10 | 3 | P2 | Documentazione API interna e API pubblica v1 sicura | Abilita pairing watch, Withings e Polar; richiede DTO, auth e concorrenza | modello dati stabilizzato |
-| 11 | 2B/2C | P2 | Sincronizzazione server e controllo da smartwatch | Richiede API/pairing e un companion specifico per piattaforma | 2A, 3 |
-| 12 | 8 | P3 | Recupero peso da Withings | Utile ma dipende da OAuth, secret store e account reale | ID 3 e ID 12 |
-| 13 | 9 | P3 | Arricchimento da Polar Flow | API in sola lettura e nessuna serie/peso importabile: valore inferiore rispetto a Withings | ID 3 e ID 12 |
+| Ordine | ID originale | Stato | Priorità | Requisito | Motivo dell'ordine | Dipende da |
+|---:|---:|---|---|---|---|---|
+| 1 | 6 | **Completato** | P0 | Identità delle istanze tra routine | Evita contaminazioni di peso, target, streak e recupero fra configurazioni differenti | — |
+| 2 | 11 | **Completato** | P0 | Validare il livello realmente completato (`RF-11.1`) | Corregge direttamente le prescrizioni, compreso lo storico 8/9 eseguito a 10 | 6 |
+| 3 | 1 | **Completato** | P1 | Corpo libero puro senza campi peso | Rimuove un'ambiguità frequente e impedisce carichi invisibili recuperati dallo storico | 6, distinzione puro/zavorrato |
+| 4 | 5 | **Completato** | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
+| 5 | 12 | **Completato** | P1 | Mostrare e qualificare data/ora di inizio e fine | Lifecycle deterministico, storico leggibile e base temporale per linking esterno | — |
+| 6 | 14 | **Completato** | P1 | Rendere configurabile la richiesta del peso corporeo | Migliora l'avvio senza modificare misurazioni o compatibilità legacy | — |
+| 7 | 2A | **Non completato** | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
+| 8 | 7A | **Completato** | P1 | Cavo caricato a dischi con guida per punto/lato | Riusa il solver esistente e rimuove l'ambiguità quotidiana fra pacco pesi e dischi | 7 |
+| 9 | 4 | **Non completato** | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
+| 10 | 10 | **Non completato** | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
+| 11 | 7 | **Completato** | P2 | Profili attrezzatura, solver e snapshot | Profili per palestra, singolo manubrio, inventario, guida accessibile e nessuna retroattività | 1, 6, snapshot workout |
+| 12 | 13 | **Non completato** | P1 proposta | Riscaldamento specifico guidato | Alto valore nel workout e nessun backend; riusa identità, snapshot e solver già validati | 1, 6, 7, 11 |
+| 13 | 3 | **Non completato** | P2 | Documentazione API interna e API pubblica v1 sicura | Abilita pairing watch, Withings e Polar; richiede DTO, auth e concorrenza | modello dati stabilizzato |
+| 14 | 2B | **Non completato** | P2 | Sincronizzazione timer server e multi-device | Richiede persistenza, revisioni, API e gestione dei conflitti | 2A, 3 |
+| 15 | 2C | **Non completato** | P2 | Controllo timer da smartwatch | Richiede pairing e un companion specifico per piattaforma | 2A, 2B, 3 |
+| 16 | 8 | **Non completato** | P3 | Recupero peso da Withings | Utile ma dipende da OAuth, secret store e account reale | 3, 2B |
+| 17 | 9 | **Non completato** | P3 | Arricchimento da Polar Flow | API in sola lettura e nessuna serie/peso importabile: valore inferiore rispetto a Withings | 3, 2B |
 
 Gli ID `2A`, `2B` e `2C` non introducono un nuovo requisito: dividono il punto 2 in fondazione
 locale, sincronizzazione server e companion smartwatch. Questa separazione evita di legare la
 correttezza del timer alla disponibilità di un determinato modello di orologio.
 
+Il **prossimo requisito non completato** in questo ordine è quindi **2A — timer locale persistente
+e deterministico**. L'estensione **7A** è completata e attende soltanto il commit dedicato. I
+requisiti 8 e 9 restano esplicitamente fuori dallo scope corrente.
+
 ### Pacchetti di rilascio raccomandati
 
 #### Release A — Correttezza della progressione
+
+**Stato: Completata.**
 
 1. Punto 6: identità slot e progression group.
 2. Punto 11: livello validato, due conferme al massimo e rivalutazione controllata dello storico.
@@ -1247,23 +1760,44 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 
 #### Release B — Esperienza quotidiana
 
+**Stato: Parziale — 4 requisiti su 7 completati.**
+
 1. Corpo libero puro/zavorrato — completato e validato.
 2. Default auto-riduzione sulle sole nuove selezioni Confirmed — completato e validato.
 3. Orari start/end — completato e validato.
-4. Timer locale persistente.
-5. Rail routine.
-6. Alias e ricerca unica.
+4. Richiesta del peso corporeo all'avvio configurabile — completata e validata.
+5. Timer locale persistente — non completato.
+6. Rail routine — non completato.
+7. Alias e ricerca unica — non completato.
 
 Questi requisiti possono essere consegnati in commit separati e verificati uno per volta.
 
 #### Release C — Attrezzatura
 
+**Stato: Completata; il commit dedicato della 7A è pendente.**
+
 1. Profili palestra e semantica del carico — completato e validato.
 2. Peso del singolo manubrio e quantità — completato e validato.
 3. Solver piastre/pesi disponibili — completato e validato.
 4. Snapshot immutabile e messaggio verde durante l'esercizio — completato e validato.
+5. Preset cavo plate-loaded e guida esplicita per punto/lato — completato e validato (`7A`).
+
+#### Release C.1 — Assistente al riscaldamento specifico
+
+**Stato: Non iniziata; specifica pronta e autorizzazione allo sviluppo non ancora ricevuta.**
+
+1. Motore puro e versionato `specific_warmup_v1`.
+2. Risoluzione della prossima serie prescritta dello specifico slot.
+3. Riutilizzo del solver attrezzatura per totale, per lato e carico praticabile.
+4. Bottom sheet accessibile nel workout, senza registrare false serie eseguite.
+5. Test property/golden, isolamento tra routine e no-regression completo.
+
+Questa release resta un commit autonomo e reversibile. Non richiede modifiche backend né deve
+essere accorpata a timer, API o integrazioni esterne.
 
 #### Release D — Piattaforma e smartwatch
+
+**Stato: Non iniziata.**
 
 1. Documentare il protocollo interno corrente.
 2. Stabilire DTO, API v1, autenticazione e pairing.
@@ -1275,32 +1809,32 @@ OS. Supportarle entrambe nella prima release raddoppierebbe test, distribuzione 
 
 #### Release E — Provider esterni
 
+**Stato: Non iniziata e fuori dallo scope corrente.**
+
 1. Withings in sola lettura con provenienza e deduplica.
 2. Polar Flow in sola lettura come arricchimento del workout.
 
-### Primo via libera consigliato
+### Via libera richiesto per il requisito 13
 
-Il primo sviluppo da autorizzare è soltanto la **Release A**. Al termine devono essere consegnati:
-
-- codice e test automatici;
-- report aggiornato con scenari replicabili;
-- confronto prima/dopo sugli stessi JSON di prova;
-- nessuna riscrittura retroattiva dei workout; la rivalutazione semantica richiesta deve cambiare
-  soltanto la prescrizione futura;
-- evidenza della nuova prescrizione futura derivata dallo storico reale.
-
-La Release A è stata validata prima di avviare la Release B. Questa sequenza mantiene isolati gli
-eventuali problemi del calcolo da quelli introdotti dalle successive modifiche UI.
+L'inserimento nel backlog non autorizza lo sviluppo. Prima di avviare la **Release C.1** l'utente
+deve validare la priorità proposta e la tabella `specific_warmup_v1`. La consegna dovrà essere un
+solo requisito/commit con codice, test automatici, report aggiornato, scenari manuali replicabili
+e prova che serie, progressione, recupero e storico restano invariati.
 
 ## 8. Piano di sviluppo consigliato
 
 ### Fase 0 — specifica e test di caratterizzazione
+
+**Stato: Parziale.** Le caratterizzazioni locali sono presenti; le fixture provider restano fuori
+scope insieme ai requisiti 8 e 9.
 
 1. Bloccare con test i comportamenti legacy di scope, timer, bodyweight e import.
 2. Aggiungere fixture con stesso esercizio in due routine e duplicato nella stessa routine.
 3. Aggiungere fixture Withings/Polar soltanto da payload ufficiali anonimizzati.
 
 ### Fase 1 — identità e progressione
+
+**Stato: Completata.**
 
 1. Introdurre `routineExerciseId` persistente.
 2. Introdurre `progressionId` e reader legacy.
@@ -1312,13 +1846,18 @@ eventuali problemi del calcolo da quelli introdotti dalle successive modifiche U
 
 ### Fase 2 — quick win e UX locale
 
+**Stato: Parziale — 4 attività completate, 2 non completate.**
+
 1. Separare corpo libero puro e zavorrato — completato e validato.
 2. Attivare auto-riduzione soltanto sulle nuove selezioni Confirmed — completato e validato.
 3. Mostrare orari start/end con provenance — completato e validato.
-4. Aggiungere rail routine accessibile.
-5. Centralizzare la ricerca e aggiungere alias.
+4. Rendere configurabile la richiesta del peso corporeo — completato e validato.
+5. Aggiungere rail routine accessibile — non completato.
+6. Centralizzare la ricerca e aggiungere alias — non completato.
 
 ### Fase 3 — timer
+
+**Stato: Non iniziata.** La deadline in memoria è una fondazione preesistente, non soddisfa 2A.
 
 1. Estrarre un motore timer puro con clock iniettato.
 2. Persistenza locale e revisioni.
@@ -1327,13 +1866,30 @@ eventuali problemi del calcolo da quelli introdotti dalle successive modifiche U
 
 ### Fase 4 — attrezzatura
 
+**Stato: Completata; il commit dedicato della 7A è pendente.**
+
 1. Modello profili/attrezzi e convenzioni — completato.
 2. Resolver catalogo + override per slot — completato.
 3. Solver deterministico delle piastre — completato.
 4. Snapshot nel workout — completato.
 5. Messaggio success durante l'esecuzione — completato.
+6. Distinguere cavo a pacco pesi e cavo plate-loaded con preview/guida per punto — completato e
+   validato.
+
+### Fase 4.1 — riscaldamento specifico
+
+**Stato: Non iniziata.**
+
+1. Congelare con test la risoluzione della prossima serie prescritta e la guida attrezzatura.
+2. Implementare il motore puro `specific_warmup_v1` e i relativi invarianti/property test.
+3. Adattare ogni tappa tramite lo snapshot e il solver dell'attrezzatura già esistenti.
+4. Aggiungere il trigger testuale e la bottom sheet accessibile nel workout.
+5. Verificare esplicitamente che nessuna tappa entri nelle serie allenanti o negli algoritmi di
+   progressione, volume, PR e recupero.
 
 ### Fase 5 — API e integrazioni
+
+**Stato: Non iniziata.** I requisiti provider 8 e 9 restano esclusi dallo sviluppo corrente.
 
 1. Documentare senza ambiguità il protocollo interno esistente.
 2. DTO/provenance, secret store e lock/revision per utente.
@@ -1362,12 +1918,14 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 11. `feat: add personal exercise aliases and shared search`
 12. `feat: persist deterministic rest timers`
 13. `feat: add equipment profiles and immutable loading guidance` — Release C, requisito 7 in un commit unico
-14. `docs: describe internal api and add openapi contract`
-15. `feat: add scoped personal access tokens and read api`
-16. `feat: sync revisioned rest timers and pair trusted devices`
-17. `feat: add the first smartwatch companion controls`
-18. `feat: import withings weight with provenance`
-19. `feat: link polar training enrichment`
+14. `feat: distinguish selectorized and plate-loaded cable equipment` — estensione 7A
+15. `feat: add evidence-informed warm-up loading guide` — Release C.1, requisito 13
+16. `docs: describe internal api and add openapi contract`
+17. `feat: add scoped personal access tokens and read api`
+18. `feat: sync revisioned rest timers and pair trusted devices`
+19. `feat: add the first smartwatch companion controls`
+20. `feat: import withings weight with provenance`
+21. `feat: link polar training enrichment`
 
 ## 10. File probabilmente coinvolti
 
@@ -1379,8 +1937,11 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 | Stato/sync | `frontend/src/store/useStore.js`, `api/server.js` |
 | Routine | `frontend/src/views/Plan.jsx`, `frontend/src/views/RoutineEdit.jsx` |
 | Corpo libero/config | `frontend/src/sheets.jsx`, `frontend/src/lib/history.js` |
+| Avvio/peso corporeo | `frontend/src/views/Settings.jsx`, `frontend/src/sheets.jsx`, `frontend/src/store/useStore.js`, `frontend/src/views/Home.jsx` |
 | Alias/ricerca | `frontend/src/lib/exercises.js`, `frontend/src/views/Library.jsx`, `frontend/src/sheets.jsx` |
 | Attrezzatura | `frontend/src/lib/equipment-load.js`, `frontend/src/views/Equipment.jsx`, `frontend/src/components/EquipmentGuide.jsx`, `sheets.jsx`, `Workout.jsx` e test dedicati |
+| Cavo plate-loaded 7A | `frontend/src/lib/equipment-load.js`, `frontend/src/views/Equipment.jsx`, `frontend/src/components/EquipmentGuide.jsx`, `frontend/src/sheets.jsx`, locale e test attrezzatura/UI |
+| Riscaldamento | nuovo `frontend/src/lib/warmup.js`, nuovo `frontend/src/components/WarmupGuide.jsx`, `Workout.jsx`, `sheets.jsx`, `equipment-load.js`, `workout-set-status.js` e test dedicati |
 | Timestamp/import | `frontend/src/lib/format.js`, `frontend/src/lib/import-csv.js` |
 | API/provider | `api/server.js`, nuovi moduli API/OAuth/provider, `docs/openapi.yaml`, `docs/API.md` |
 | Presentazione | `frontend/src/index.css` e tutti gli 11 pacchetti locale |
@@ -1389,7 +1950,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 
 ### Automatici
 
-- unit test di normalizzazione, scope, outcome, timer, plate solver e matching temporale;
+- unit test di normalizzazione, scope, outcome, timer, plate solver, warm-up e matching temporale;
 - integration test di start → active → finish → storico;
 - fixture JSON legacy e nuovi snapshot;
 - import/export round-trip;
@@ -1403,6 +1964,8 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 - tastiera e screen reader;
 - tema chiaro/scuro e contrasto del messaggio verde;
 - rail routine, alias chip e configurazione attrezzatura;
+- cavo a pacco pesi/dischi, uno/due punti, preview e guida senza label troncate;
+- popup riscaldamento: focus, testi non troncati, carico totale/per lato e nessun overflow;
 - niente peso visibile nel corpo libero puro.
 
 ### Ambiente reale
@@ -1412,6 +1975,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 - iOS/Android background, force-close e risparmio energetico;
 - OAuth demo/account reali Withings e Polar in suite gated;
 - cambio palestra fra due sessioni con storico invariato;
+- guida riscaldamento confrontata con i carichi fisicamente componibili dell'attrezzo reale;
 - watch associato: visualizzazione, `+30 s`, stop/skip, conflitto di revisione e offline; la
   notifica best-effort deve essere verificata separatamente come fallback.
 
@@ -1434,12 +1998,25 @@ Decisioni confermate dall'utente il 2026-08-26:
    livello 9 e porta il target successivo a 10. Due sessioni consecutive che raggiungono tutte il
    massimo aumentano il carico e riportano il target al minimo, anche quando i loro target storici
    erano 8 e 9, secondo `RF-11.1`.
+5. La richiesta del peso corporeo prima di ogni workout è configurabile per profilo. Il default
+   legacy resta attivo; disabilitarla salta soltanto il popup e non modifica le misurazioni già
+   registrate né impedisce la registrazione manuale.
+
+### Decisione applicata per l'estensione 7A
+
+La 7A implementa la convenzione analizzata il 2026-09-22: per il cavo plate-loaded il peso
+registrato rappresenta il **totale della macchina** e openGym lo divide sui punti di carico dopo
+avere sottratto la tara. Il rapporto delle pulegge non viene applicato e la UI lo dichiara. Se in
+futuro il numero registrato dovrà rappresentare il peso già `per lato/torre`, verrà introdotta
+una semantica separata `per_loading_point`, senza reinterpretare silenziosamente dati esistenti.
 
 Polar non richiede una decisione tecnica sulla direzione: la scrittura openGym → Polar non è
 offerta dall'API pubblica corrente. L'unica integrazione raccomandabile è Polar → openGym come
 arricchimento.
 
-## 13. Fonti esterne ufficiali consultate
+## 13. Fonti esterne consultate
+
+### Piattaforma e provider
 
 Consultate il 2026-08-26:
 
@@ -1456,19 +2033,39 @@ Consultate il 2026-08-26:
 - [Apple watchOS apps](https://developer.apple.com/documentation/watchos-apps/)
 - [W3C High Resolution Time](https://www.w3.org/TR/hr-time-3/)
 
+### Riscaldamento specifico e resistance training
+
+Consultate il 2026-09-20:
+
+- [International Expert Consensus on Warm-Up Protocols for Athletes (2026)](https://doi.org/10.1123/ijspp.2025-0647)
+- [Acute Effects of Resistance Training Warm-Up and Re-Warm-Up on Dynamic Strength Performance: A Scoping Review (2026)](https://doi.org/10.1007/s42978-025-00361-9)
+- [The effect of warm-up in resistance training and strength performance: a systematic review (2021)](https://doi.org/10.6063/motricidade.21143)
+- [The Role of Specific Warm-up during Bench Press and Squat Exercises (2020)](https://pmc.ncbi.nlm.nih.gov/articles/PMC7558980/)
+- [High-load and low-volume warm-up increases performance in a resistance training session (2024)](https://pubmed.ncbi.nlm.nih.gov/39593476/)
+- [Effect of warm-up protocols using lower and higher loads on multiple-set back squat volume-load (2024)](https://pmc.ncbi.nlm.nih.gov/articles/PMC11243969/)
+- [Warming up to improved performance? Effects of different specific warm-up protocols (2025)](https://doi.org/10.1016/j.smhs.2025.08.002)
+- [Effects of Resistance Training to Muscle Failure on Acute Fatigue: systematic review and meta-analysis (2022)](https://pubmed.ncbi.nlm.nih.gov/34881412/)
+- [Effects of warming-up on physical performance: systematic review with meta-analysis (2010)](https://pubmed.ncbi.nlm.nih.gov/19996770/)
+- [A systematic review of the effects of upper body warm-up on performance and injury (2015)](https://pubmed.ncbi.nlm.nih.gov/25694615/)
+- [The effect of muscle warm-up on force-time parameters: systematic review and meta-analysis (2025)](https://pubmed.ncbi.nlm.nih.gov/39864808/)
+
 ## 14. Conclusione
 
-Il backlog non è un unico sviluppo. Contiene due correzioni di dominio prioritarie, cinque
-miglioramenti locali e tre epic infrastrutturali.
+Il backlog non è un unico sviluppo. Contiene correzioni di dominio prioritarie, miglioramenti
+locali dell'esperienza quotidiana e epic infrastrutturali separate.
 
-La sequenza più sicura è:
+Sono già completati e verificati: isolamento delle istanze (6), progressione dopo modifiche
+manuali (11), corpo libero puro/zavorrato (1), default recupero automatico (5), timestamp (12),
+attrezzatura con snapshot (7), distinzione dei cavi e guida per punto (7A) e richiesta del peso
+corporeo configurabile (14).
 
-1. isolare le istanze e rendere corretta la progressione dopo modifiche manuali;
-2. completare corpo libero, default recupero, timestamp, routine e alias;
-3. rendere il timer persistente;
-4. introdurre attrezzatura con snapshot;
-5. creare API pubblica e secret store;
-6. collegare Withings e Polar in sola lettura.
+La sequenza residua più sicura è:
+
+1. completare 2A, rendendo il timer locale persistente e deterministico;
+2. realizzare rail routine (4) e alias/ricerca centralizzata (10);
+3. avviare il riscaldamento specifico (13) solo dopo l'autorizzazione esplicita;
+4. creare documentazione/contratto API (3), quindi timer multi-device (2B) e companion (2C);
+5. valutare Withings (8) e Polar (9) solo quando rientreranno nello scope.
 
 Questa sequenza mantiene spiegabile ogni prescrizione, conserva i workout passati e impedisce
 che integrazioni o cambi di palestra modifichino retroattivamente ciò che è già stato registrato.

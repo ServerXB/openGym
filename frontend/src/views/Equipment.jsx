@@ -6,12 +6,15 @@ import { EXDB } from '../lib/exercises.js'
 import { fmtLoad, uid } from '../lib/format.js'
 import { t } from '../lib/i18n.js'
 import {
+  CABLE_LOADING_MECHANISM,
   EQUIPMENT_KIND,
   EQUIPMENT_KINDS,
+  cableLoadingMechanism,
   defaultCatalogEquipment,
   normalizeEquipmentItem,
   normalizeEquipmentProfile
 } from '../lib/equipment-load.js'
+import { cableMechanismLabel } from '../lib/equipment-presentation.js'
 import { confirmSheet } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
 import { Button, Row, Section, Segmented, SelectRow, Stepper, Switch, TextArea, TextField } from '../components/ui.jsx'
@@ -24,6 +27,8 @@ const KIND_KEYS = {
   [EQUIPMENT_KIND.PLATE_LOADED_MACHINE]: 'Plate-loaded machine',
   [EQUIPMENT_KIND.CUSTOM]: 'Manual or other equipment'
 }
+
+const CABLE_EQUIPMENT_TYPE = 'cable_machine'
 
 const KIND_HELP = {
   [EQUIPMENT_KIND.SYMMETRIC_BAR]: 'The logged weight is the total including the empty bar; plates must match on both sides.',
@@ -114,6 +119,7 @@ function Profiles() {
 
 function InventoryEditor({ draft, setDraft, unit }) {
   const stack = draft.kind === EQUIPMENT_KIND.MACHINE_STACK
+  const plateLoadedCable = cableLoadingMechanism(draft) === CABLE_LOADING_MECHANISM.PLATE_LOADED
   const rows = Array.isArray(draft.denominations) ? draft.denominations : []
   const change = (index, field, value) => setDraft(current => ({
     ...current,
@@ -133,9 +139,13 @@ function InventoryEditor({ draft, setDraft, unit }) {
         : 'Available weights and quantities')}</div>
     <p className="cfg-help">{t(stack
       ? 'Enter every value printed on the machine stack.'
-      : 'Quantities are total pieces in this profile, not pieces per side.')}</p>
+      : plateLoadedCable
+        ? 'Quantities are total pieces in this profile, not pieces per loading point.'
+        : 'Quantities are total pieces in this profile, not pieces per side.')}</p>
     {plateInventoryKind(draft.kind) &&
-      <p className="cfg-help">{t('Leave the plate inventory empty to calculate only the load per side. Add plates later for calculated compositions and nearest alternatives.')}</p>}
+      <p className="cfg-help">{t(plateLoadedCable
+        ? 'Leave the plate inventory empty to calculate only the load per loading point. Add plates later for calculated compositions and nearest alternatives.'
+        : 'Leave the plate inventory empty to calculate only the load per side. Add plates later for calculated compositions and nearest alternatives.')}</p>}
     {rows.map((row, index) => <div className="equipment-inventory-row" key={index}>
       <Stepper label={t('Weight')} unit={unit} value={row.weight || 0} step={0.25}
         onChange={value => change(index, 'weight', value)} />
@@ -151,30 +161,74 @@ function InventoryEditor({ draft, setDraft, unit }) {
   </div>
 }
 
-function ItemEditor({ profileId, item, unit, close }) {
+export function ItemEditor({ profileId, item, unit, close }) {
   const update = useStore(s => s.update)
   const [draft, setDraft] = useState(() => structuredClone(item || defaultItem()))
   const editing = !!item
-  const kindOptions = EQUIPMENT_KINDS.map(value => ({ value, label: t(KIND_KEYS[value]) }))
+  const cableMechanism = cableLoadingMechanism(draft)
+  const cablePreset = !!cableMechanism
+  const equipmentType = cablePreset ? CABLE_EQUIPMENT_TYPE : draft.kind
+  const kindOptions = [
+    { value: CABLE_EQUIPMENT_TYPE, label: t('Cable machine') },
+    ...EQUIPMENT_KINDS.map(value => ({ value, label: t(KIND_KEYS[value]) }))
+  ]
   const catalogOptions = [
     { value: '', label: t('No automatic match') },
     ...CATALOG_EQUIPMENT.map(value => ({ value, label: t(value) }))
   ]
-  const setKind = kind => setDraft(current => ({
-    ...current,
-    kind,
-    sideCount: kind === EQUIPMENT_KIND.PLATE_LOADED_MACHINE ? (current.sideCount === 1 ? 1 : 2) : 2,
-    // A new kind must not silently keep the previous kind's automatic match (for example a
-    // loadable dumbbell still classified as barbell). More specific catalog variants remain
-    // available in the picker immediately below.
-    catalogEquipment: kind === current.kind
-      ? current.catalogEquipment
-      : defaultCatalogEquipment(kind)
-  }))
+  const setKind = selection => setDraft(current => {
+    if (selection === CABLE_EQUIPMENT_TYPE) {
+      return {
+        ...current,
+        kind: EQUIPMENT_KIND.MACHINE_STACK,
+        catalogEquipment: 'cable',
+        tareWeight: 0,
+        sideCount: 1,
+        // Stack values and plate denominations have different meanings. Starting the guided
+        // cable preset empty prevents a plausible-looking but physically invalid crossover.
+        denominations: []
+      }
+    }
+    return {
+      ...current,
+      kind: selection,
+      sideCount: selection === EQUIPMENT_KIND.PLATE_LOADED_MACHINE
+        ? (current.sideCount === 1 ? 1 : 2)
+        : 2,
+      // A new kind must not silently keep the previous kind's automatic match (for example a
+      // loadable dumbbell still classified as barbell). More specific catalog variants remain
+      // available in the picker immediately below.
+      catalogEquipment: selection === current.kind && !cableLoadingMechanism(current)
+        ? current.catalogEquipment
+        : defaultCatalogEquipment(selection)
+    }
+  })
+  const setCableMechanism = mechanism => setDraft(current => {
+    const kind = mechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+      ? EQUIPMENT_KIND.PLATE_LOADED_MACHINE
+      : EQUIPMENT_KIND.MACHINE_STACK
+    if (kind === current.kind && current.catalogEquipment === 'cable') return current
+    return {
+      ...current,
+      kind,
+      catalogEquipment: 'cable',
+      tareWeight: kind === EQUIPMENT_KIND.MACHINE_STACK ? 0 : current.tareWeight || 0,
+      sideCount: kind === EQUIPMENT_KIND.MACHINE_STACK ? 1 : 2,
+      denominations: []
+    }
+  })
+  const cableDefaultLabel = cableMechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+    ? 'Plate-loaded cable'
+    : 'Cable weight stack'
+  const kindHelp = cablePreset
+    ? cableMechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+      ? 'The logged weight is the machine total. It is divided across the loading points after subtracting empty resistance. Pulley ratio is not applied.'
+      : 'Enter each value printed on this cable weight stack.'
+    : KIND_HELP[draft.kind]
   const save = () => {
     const normalized = normalizeEquipmentItem({
       ...draft,
-      label: draft.label.trim() || t(KIND_KEYS[draft.kind]),
+      label: draft.label.trim() || t(cablePreset ? cableDefaultLabel : KIND_KEYS[draft.kind]),
       denominations: (draft.denominations || []).map(row => ({
         ...row,
         count: draft.kind === EQUIPMENT_KIND.MACHINE_STACK ? 1 : row.count
@@ -209,24 +263,37 @@ function ItemEditor({ profileId, item, unit, close }) {
     <div className="equipment-field">
       <label htmlFor="equipment-label">{t('Name')}</label>
       <TextField id="equipment-label" value={draft.label}
-        placeholder={t(KIND_KEYS[draft.kind])}
+        placeholder={t(cablePreset ? cableDefaultLabel : KIND_KEYS[draft.kind])}
         onChange={event => setDraft(current => ({ ...current, label: event.target.value }))} />
     </div>
     <div className="sect-b equipment-picker-group">
       <SelectRow icon="wrench" iconTint="var(--indigo)" title={t('Equipment type')}
-        value={draft.kind} options={kindOptions} onChange={setKind} />
-      <SelectRow icon="link" iconTint="var(--blue)" title={t('Automatic exercise match')}
-        value={draft.catalogEquipment || ''} options={catalogOptions}
-        onChange={catalogEquipment => setDraft(current => ({ ...current, catalogEquipment }))} />
+        value={equipmentType} options={kindOptions} onChange={setKind} />
+      {cablePreset
+        ? <Row icon="link" iconTint="var(--blue)" title={t('Automatic exercise match')} value={t('cable')} />
+        : <SelectRow icon="link" iconTint="var(--blue)" title={t('Automatic exercise match')}
+            value={draft.catalogEquipment || ''} options={catalogOptions}
+            onChange={catalogEquipment => setDraft(current => ({ ...current, catalogEquipment }))} />}
     </div>
-    <p className="cfg-help equipment-kind-help">{t(KIND_HELP[draft.kind])}</p>
+    {cablePreset && <fieldset className="equipment-cable-mechanism">
+      <legend>{t('How is this cable loaded?')}</legend>
+      <Segmented options={[
+        { value: CABLE_LOADING_MECHANISM.SELECTOR_STACK, label: t('Weight stack') },
+        { value: CABLE_LOADING_MECHANISM.PLATE_LOADED, label: t('Plates on pegs') }
+      ]} value={cableMechanism} onChange={setCableMechanism} />
+    </fieldset>}
+    <p className="cfg-help equipment-kind-help">{t(kindHelp)}</p>
 
     {hasTare(draft.kind) && <div className="equipment-grid">
-      <Stepper label={t(draft.kind === EQUIPMENT_KIND.LOADABLE_DUMBBELL ? 'Empty handle weight' : 'Empty equipment weight')}
+      <Stepper label={t(draft.kind === EQUIPMENT_KIND.LOADABLE_DUMBBELL
+        ? 'Empty handle weight'
+        : cablePreset
+          ? 'Empty cable resistance'
+          : 'Empty equipment weight')}
         unit={unit} value={draft.tareWeight || 0} step={0.25}
         onChange={tareWeight => setDraft(current => ({ ...current, tareWeight }))} />
       {draft.kind === EQUIPMENT_KIND.PLATE_LOADED_MACHINE && <div className="equipment-field">
-        <span className="equipment-label">{t('Loading sides')}</span>
+        <span className="equipment-label">{t(cablePreset ? 'Loading points' : 'Loading sides')}</span>
         <Segmented options={[
           { value: 1, label: t('One') }, { value: 2, label: t('Two') }
         ]} value={draft.sideCount === 1 ? 1 : 2}
@@ -309,7 +376,7 @@ function ProfileEditor({ profileId }) {
         <Row key={item.id} icon={item.kind === EQUIPMENT_KIND.SYMMETRIC_BAR ? 'barbell' : 'dumbbell'}
           iconTint="var(--indigo)" title={item.label}
           subtitle={[
-            t(KIND_KEYS[item.kind]),
+            cableMechanismLabel(item) || t(KIND_KEYS[item.kind]),
             hasTare(item.kind) ? t('empty {0} {1}', fmtLoad(item.tareWeight), normalized.unit) : null,
             inventoryKind(item.kind) ? t('{0} inventory values', item.denominations.length) : null
           ].filter(Boolean).join(' · ')}

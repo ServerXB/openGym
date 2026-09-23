@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CABLE_LOADING_MECHANISM,
   EQUIPMENT_KIND,
   LOAD_SEMANTICS,
+  cableLoadingMechanism,
   calculateLoadingGuide,
+  createCableEquipmentPreset,
   defaultCatalogEquipment,
   equipmentGuideForEntry,
   normalizeEquipmentProfile,
@@ -76,6 +79,32 @@ describe('equipment profile normalization', () => {
     expect(snapshot).toMatchObject({ id: 'gym', unit: 'kg', workoutUnit: 'lb' })
     expect(snapshot.items[0].tareWeight).toBe(20)
     expect(snapshotActiveEquipmentProfile({ equipmentProfiles: [profile()] })).toBeNull()
+  })
+
+  it('creates cable presets by reusing existing kinds and ignores speculative pulley ratios', () => {
+    const stack = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.SELECTOR_STACK, {
+      id: 'cable-stack', label: 'Cable stack', tareWeight: 25, sideCount: 2,
+      denominations: [{ weight: 10, count: 99 }], pulleyRatio: 2
+    })
+    const plates = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.PLATE_LOADED, {
+      id: 'cable-plates', label: 'Cable plates', tareWeight: 10, sideCount: 1,
+      denominations: [], pulleyRatio: 0.5
+    })
+
+    expect(stack).toMatchObject({
+      kind: EQUIPMENT_KIND.MACHINE_STACK, catalogEquipment: 'cable',
+      tareWeight: 0, sideCount: 1
+    })
+    expect(plates).toMatchObject({
+      kind: EQUIPMENT_KIND.PLATE_LOADED_MACHINE, catalogEquipment: 'cable',
+      tareWeight: 10, sideCount: 1
+    })
+    expect(stack).not.toHaveProperty('pulleyRatio')
+    expect(plates).not.toHaveProperty('pulleyRatio')
+    expect(cableLoadingMechanism(stack)).toBe(CABLE_LOADING_MECHANISM.SELECTOR_STACK)
+    expect(cableLoadingMechanism(plates)).toBe(CABLE_LOADING_MECHANISM.PLATE_LOADED)
+    expect(cableLoadingMechanism({ ...plates, catalogEquipment: 'machine' })).toBeNull()
+    expect(createCableEquipmentPreset('future_mechanism', { id: 'future' })).toBeNull()
   })
 })
 
@@ -220,6 +249,79 @@ describe('loading guide', () => {
         profile: profile([item]), equipmentUse: resolved(item), targetWeight: 60, workoutUnit: 'kg'
       })).toMatchObject({ status: 'manual_per_side', sideCount, perPointWeight })
     }
+  })
+
+  it('describes plate-loaded cable arithmetic without inferring a pulley ratio', () => {
+    const twoPoints = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.PLATE_LOADED, {
+      id: 'cable-two', label: 'Plate-loaded cable', tareWeight: 10, sideCount: 2,
+      denominations: [], pulleyRatio: 2
+    })
+    const onePoint = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.PLATE_LOADED, {
+      id: 'cable-one', label: 'Plate-loaded cable', tareWeight: 10, sideCount: 1,
+      denominations: []
+    })
+
+    const twoPointGuide = calculateLoadingGuide({
+      profile: profile([twoPoints]), equipmentUse: resolved(twoPoints),
+      targetWeight: 60, workoutUnit: 'kg'
+    })
+    const onePointGuide = calculateLoadingGuide({
+      profile: profile([onePoint]), equipmentUse: resolved(onePoint),
+      targetWeight: 60, workoutUnit: 'kg'
+    })
+
+    expect(twoPointGuide).toMatchObject({
+      status: 'manual_per_side', catalogEquipment: 'cable',
+      cableLoadingMechanism: CABLE_LOADING_MECHANISM.PLATE_LOADED,
+      sideCount: 2, loadingPointCount: 2, perPointWeight: 25,
+      loadConvention: LOAD_SEMANTICS.TOTAL, totalAddedWeight: 50, pulleyRatioApplied: false
+    })
+    expect(onePointGuide).toMatchObject({
+      status: 'manual_per_side', cableLoadingMechanism: CABLE_LOADING_MECHANISM.PLATE_LOADED,
+      sideCount: 1, loadingPointCount: 1, perPointWeight: 50,
+      totalAddedWeight: 50, pulleyRatioApplied: false
+    })
+  })
+
+  it('keeps cable loading metadata for exact, nearest and below-tare outcomes', () => {
+    const cable = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.PLATE_LOADED, {
+      id: 'cable-inventory', label: 'Cable with plates', tareWeight: 10, sideCount: 2,
+      denominations: [{ weight: 20, count: 2 }, { weight: 5, count: 2 }]
+    })
+    const guide = targetWeight => calculateLoadingGuide({
+      profile: profile([cable]), equipmentUse: resolved(cable), targetWeight, workoutUnit: 'kg'
+    })
+
+    expect(guide(60)).toMatchObject({
+      status: 'exact', loadingPointCount: 2, totalAddedWeight: 50,
+      pulleyRatioApplied: false, exact: { weight: 60 }
+    })
+    expect(guide(58)).toMatchObject({
+      status: 'nearest', loadingPointCount: 2, totalAddedWeight: 48,
+      pulleyRatioApplied: false, lower: { weight: 50 }, upper: { weight: 60 }
+    })
+    expect(guide(5)).toMatchObject({
+      status: 'below_tare', loadingPointCount: 2, totalAddedWeight: 0,
+      pulleyRatioApplied: false, tareWeight: 10
+    })
+  })
+
+  it('keeps selectorized cable stacks separate from plate-loading metadata', () => {
+    const stack = createCableEquipmentPreset(CABLE_LOADING_MECHANISM.SELECTOR_STACK, {
+      id: 'cable-stack', label: 'Selectorized cable',
+      denominations: [{ weight: 50, count: 1 }, { weight: 60, count: 1 }]
+    })
+    const guide = calculateLoadingGuide({
+      profile: profile([stack]), equipmentUse: resolved(stack),
+      targetWeight: 60, workoutUnit: 'kg'
+    })
+
+    expect(guide).toMatchObject({
+      status: 'exact', exact: { weight: 60 }, catalogEquipment: 'cable',
+      cableLoadingMechanism: CABLE_LOADING_MECHANISM.SELECTOR_STACK
+    })
+    expect(guide).not.toHaveProperty('loadingPointCount')
+    expect(guide).not.toHaveProperty('pulleyRatioApplied')
   })
 
   it('loads a 70 kg target on a 20 kg bar as 20 + 5 kg per side', () => {

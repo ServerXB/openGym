@@ -626,6 +626,7 @@ h4.sec{
 .equipment-guide strong{font-size:13px;font-weight:600;color:inherit}
 .equipment-guide span{color:inherit}
 .equipment-guide small{font-size:12px;line-height:1.35;color:inherit}
+.equipment-guide .equipment-guide-context{font-weight:600}
 .equipment-guide.success{background:var(--success-soft);color:var(--success)}
 .equipment-guide.warning{background:var(--warning-soft);color:var(--warning)}
 .equipment-guide.manual{background:var(--surface-2);color:var(--label)}
@@ -711,6 +712,11 @@ h4.sec{
   font-size:13px;line-height:1.35;color:var(--label-2);padding:0 2px;
 }
 .equipment-picker-group{margin-bottom:8px}
+.equipment-cable-mechanism{min-inline-size:0;margin:0 0 12px;padding:0;border:0}
+.equipment-cable-mechanism legend{
+  margin-bottom:7px;padding:0 2px;font-size:13px;line-height:1.35;color:var(--label-2);
+}
+.equipment-cable-mechanism .seg{width:100%}
 .equipment-kind-help{margin:0 2px 16px}
 .equipment-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-bottom:16px}
 .equipment-grid>*{min-width:0}

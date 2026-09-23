@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import EquipmentGuide, { equipmentGuideCopy } from './EquipmentGuide.jsx'
 import italian from '../locales/it.js'
+import { CABLE_LOADING_MECHANISM } from '../lib/equipment-load.js'
 
 const exactBar = {
   status: 'exact', targetWeight: 70, unit: 'kg', itemLabel: 'Olympic bar',
@@ -102,6 +103,62 @@ describe('equipment loading message', () => {
     })
     expect(oneSidedMachine.detail).toContain('Add 50 kg;')
     expect(oneSidedMachine.detail).not.toContain('per side')
+  })
+
+  it('shows total, loading points and physical plate mass for a two-point cable', () => {
+    const guide = {
+      status: 'manual_per_side', targetWeight: 60, unit: 'kg', itemLabel: 'Garage cable',
+      kind: 'plate_loaded_machine', cableLoadingMechanism: CABLE_LOADING_MECHANISM.PLATE_LOADED,
+      tareWeight: 10, sideCount: 2, loadingPointCount: 2,
+      perPointWeight: 25, totalAddedWeight: 50, pulleyRatioApplied: false
+    }
+    const copy = equipmentGuideCopy(guide)
+    const html = renderToStaticMarkup(<EquipmentGuide guide={guide} />)
+
+    expect(copy.context).toBe('Plate-loaded cable · 2 loading points')
+    expect(copy.detail).toBe('Load 25 kg on each side.')
+    expect(copy.note).toContain('Total plates: 50 kg.')
+    expect(copy.note).toContain('Choose the plate combination manually.')
+    expect(copy.note).toContain('Pulley ratio is not applied.')
+    expect(html).toContain('Target 60 kg · Garage cable')
+    expect(html).toContain('equipment-guide-context')
+    expect(html).toContain('Plate-loaded cable · 2 loading points')
+    expect(html).toContain('class="equipment-guide success"')
+  })
+
+  it('uses loading-peg wording for a one-point cable and never says per side', () => {
+    const copy = equipmentGuideCopy({
+      status: 'manual_per_side', targetWeight: 60, unit: 'kg', itemLabel: 'Single cable',
+      kind: 'plate_loaded_machine', cableLoadingMechanism: CABLE_LOADING_MECHANISM.PLATE_LOADED,
+      tareWeight: 10, sideCount: 1, loadingPointCount: 1,
+      perPointWeight: 50, totalAddedWeight: 50, pulleyRatioApplied: false
+    })
+
+    expect(copy.context).toBe('Plate-loaded cable · one loading point')
+    expect(copy.detail).toBe('Load 50 kg on the loading peg.')
+    expect(copy.detail).not.toContain('side')
+  })
+
+  it('keeps selector stacks distinct and adds cable context to exact plate compositions', () => {
+    const stack = equipmentGuideCopy({
+      status: 'exact', targetWeight: 60, unit: 'kg', itemLabel: 'Cable stack',
+      kind: 'machine_stack', cableLoadingMechanism: CABLE_LOADING_MECHANISM.SELECTOR_STACK,
+      exact: { weight: 60, composition: [] }
+    })
+    expect(stack.context).toBe('Cable · weight stack')
+    expect(stack.detail).toBe('Select 60 kg on the machine stack.')
+    expect(stack.detail).not.toContain('side')
+
+    const plates = equipmentGuideCopy({
+      status: 'exact', targetWeight: 60, unit: 'kg', itemLabel: 'Cable plates',
+      kind: 'plate_loaded_machine', cableLoadingMechanism: CABLE_LOADING_MECHANISM.PLATE_LOADED,
+      tareWeight: 10, sideCount: 2, loadingPointCount: 2,
+      totalAddedWeight: 50, pulleyRatioApplied: false,
+      exact: { weight: 60, composition: [{ weight: 20, count: 1 }, { weight: 5, count: 1 }] }
+    })
+    expect(plates.detail).toBe('Load 20 kg + 5 kg on each side.')
+    expect(plates.note).toBe('Total plates: 50 kg. Pulley ratio is not applied.')
+    expect(italian['Total plates: {0}.']).toBe('Totale dischi: {0}.')
   })
 
   it('states the single-dumbbell convention separately from quantity', () => {

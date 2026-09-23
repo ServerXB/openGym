@@ -44,6 +44,11 @@ import {
   resolveEquipmentUse,
   snapshotActiveEquipmentProfile
 } from './lib/equipment-load.js'
+import {
+  cableMechanismLabel,
+  equipmentPickerLabel,
+  equipmentPickerSubtitle
+} from './lib/equipment-presentation.js'
 import { MOBILE, shareExport } from './lib/mobile.js'
 import {
   createRoutineExerciseId,
@@ -809,8 +814,8 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine, equipmentCon
     { value: 'none', label: t('No loading suggestion') },
     ...(equipmentProfile?.items || []).map(item => ({
       value: `item:${item.id}`,
-      label: item.label,
-      subtitle: item.catalogEquipment ? t('Matches {0}', t(item.catalogEquipment)) : t('Explicit selection only')
+      label: equipmentPickerLabel(item),
+      subtitle: equipmentPickerSubtitle(item)
     })),
     ...(configuredEquipmentUse.mode === 'item'
       && configuredEquipmentUse.profileId === equipmentProfile?.id
@@ -1031,6 +1036,9 @@ function ExConfig({ ex, existing, onSave, onDelete, close, routine, equipmentCon
         {equipmentResolution.status === 'resolved' && <Row icon="scale" iconTint="var(--teal)"
           title={t('Logged weight means')}
           value={equipmentResolution.loadSemantics === 'per_implement' ? t('one tool') : equipmentResolution.loadSemantics === 'manual' ? t('manual instruction') : t('total load')} />}
+        {equipmentResolution.status === 'resolved' && cableMechanismLabel(resolvedEquipmentItem) &&
+          <Row icon="wrench" iconTint="var(--indigo)" title={t('Cable loading method')}
+            value={cableMechanismLabel(resolvedEquipmentItem)} />}
       </div>
       {equipmentResolution.status === 'resolved'
         && ['loadable_dumbbell', 'fixed_weight'].includes(resolvedEquipmentItem?.kind)

@@ -9,7 +9,7 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 
 ## 2. Ambiente di riferimento
 
-- Data ultimo aggiornamento: 2026-09-08
+- Data ultimo aggiornamento: 2026-09-23
 - Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
@@ -1595,8 +1595,10 @@ come superati senza evidenza.
 | B | 1 — corpo libero puro/zavorrato | Implementato, validato e incluso nel commit dedicato |
 | B | 5 — auto-riduzione predefinita per nuove selezioni Confirmed | Implementato, validato e incluso nel commit dedicato |
 | B | 12 — data e ora start/end | Implementato, validato e incluso nel commit dedicato |
+| B | 14 — richiesta del peso corporeo configurabile | Implementato, validato e incluso nel commit dedicato |
 | B | 2A, 4, 10 | Non iniziata |
 | C | 7 | Implementato, validato e incluso nel commit dedicato |
+| C | 7A — cavi a pacco pesi/dischi | Implementato e validato; commit dedicato pendente per lo stop concordato |
 | D | 3, 2B, 2C | Non iniziata |
 | Esclusi | 8 Withings, 9 Polar | Fuori scope come richiesto |
 
@@ -2157,3 +2159,211 @@ Gate aggiuntivi:
    verificare che il valore scelto sia ancora presente.
 10. Esportare un backup con lo switch OFF, reimportarlo in un ambiente di prova e verificare che
     resti OFF; importare anche un backup legacy senza il campo e verificare il default ON.
+
+---
+
+## 14. Release C — Estensione 7A: cavi a pacco pesi e caricati a dischi
+
+Data verifica: **2026-09-23**
+
+Stato: **implementazione conclusa, tutti i gate automatici superati, pronta per il commit
+dedicato**. Il commit non è stato ancora creato perché è stato richiesto di fermarsi a questo
+gate per validare un requisito alla volta.
+
+### 14.1 Comportamento consegnato
+
+Nel profilo attrezzatura è disponibile il tipo guidato **Macchina a cavo**. L'editor rende
+visibile il meccanismo fisico:
+
+- **Pacco pesi**: riusa `machine_stack` e chiede i valori stampati/selezionabili;
+- **Dischi sui perni**: riusa `plate_loaded_machine`, chiede la resistenza a vuoto e permette di
+  scegliere uno o due punti da caricare;
+- l'inventario dei dischi resta facoltativo: senza inventario viene mostrato il valore numerico
+  per punto; con inventario resta disponibile la composizione deterministica già introdotta dal
+  requisito 7.
+
+Il meccanismo compare nell'elenco del profilo, nel selettore dell'attrezzo del singolo esercizio e
+nella guida verde del workout. Se pacco pesi e cavo a dischi corrispondono entrambi alla categoria
+`cable`, l'associazione automatica resta ambigua e richiede una scelta esplicita: non viene mai
+usato silenziosamente il primo attrezzo trovato.
+
+### 14.2 Convenzione e calcolo verificati
+
+Il peso registrato è il **totale della macchina**, inclusa la resistenza a vuoto configurata:
+
+```text
+carico per punto = (target totale - resistenza a vuoto) / punti da caricare
+```
+
+Scenari principali verificati:
+
+| Meccanismo | Target | Vuoto | Punti | Risultato atteso |
+|---|---:|---:|---:|---|
+| Pacco pesi | 60 kg | — | — | Seleziona 60 kg; nessun testo “per lato” |
+| Dischi | 60 kg | 0 kg | 2 | 30 kg su ciascun lato; totale dischi 60 kg |
+| Dischi | 60 kg | 10 kg | 2 | 25 kg su ciascun lato; totale dischi 50 kg |
+| Dischi | 60 kg | 10 kg | 1 | 50 kg sul perno; nessun testo “per lato” |
+
+La guida dichiara **Il rapporto delle pulegge non viene applicato**. Campi non supportati come
+`pulleyRatio` o `effectiveResistanceFactor` non vengono interpretati né propagati come una falsa
+resistenza effettiva.
+
+### 14.3 Modello dati e backward compatibility
+
+Non sono stati introdotti un nuovo `kind`, una nuova versione dello schema o una migrazione:
+
+```json
+{
+  "kind": "plate_loaded_machine",
+  "catalogEquipment": "cable",
+  "tareWeight": 10,
+  "sideCount": 2,
+  "denominations": []
+}
+```
+
+`sideCount` conserva il nome persistito e viene presentato come **Punti da caricare** soltanto
+nella UX del cavo. `cableLoadingMechanism`, `loadingPointCount`, `totalAddedWeight` e
+`pulleyRatioApplied` sono metadati derivati della guida, non nuovi obblighi per i vecchi JSON.
+
+Sono stati verificati:
+
+1. lettura di un profilo legacy senza `sideCount`, con default sicuro a due punti;
+2. vecchi workout senza `equipmentUse`, che continuano semplicemente a non mostrare una guida;
+3. snapshot immutabile di tara, punti e inventario per workout attivi e conclusi;
+4. due routine/giorni con lo stesso esercizio ma attrezzi espliciti differenti;
+5. modifica del profilo che influenza soltanto gli allenamenti avviati successivamente.
+
+### 14.4 Test automatici mirati
+
+Comando riproducibile:
+
+```powershell
+cd frontend
+npm.cmd test -- --run `
+  src/lib/equipment-load.test.js `
+  src/lib/cable-plate-load.integration.test.js `
+  src/lib/equipment-presentation.test.js `
+  src/components/EquipmentGuide.test.jsx `
+  src/views/Equipment.test.jsx `
+  src/lib/workout-scope.test.js `
+  src/lib/workout-prescription.test.js `
+  src/lib/progression-scope.test.js `
+  src/lib/plan-share.test.js `
+  src/lib/state-storage.test.js `
+  src/store/useStore.test.js `
+  src/workout-lifecycle.integration.test.jsx
+```
+
+```text
+Test Files  12 passed (12)
+Tests       129 passed (129)
+Failed      0
+```
+
+La copertura specifica include preset e normalizzazione, uno/due punti, tara zero/non zero,
+inventario assente/presente, target sotto tara, alternative vicine, unità discordanti, mapping
+ambiguo, scelta esplicita per slot, snapshot, JSON legacy, copy italiano/inglese e presentazione
+del meccanismo.
+
+### 14.5 No-regression e gate tecnici
+
+Comandi:
+
+```powershell
+cd frontend
+npm.cmd test -- --run
+npm.cmd run build
+node scripts/check-locales.mjs
+node scripts/check-equipment-solver.mjs
+cd ..
+git diff --check
+```
+
+Risultato:
+
+```text
+Regressione completa       37 file, 635 test superati, 0 falliti
+Build Vite                 superata, 124 moduli trasformati
+Locali                     11 lingue, 873 chiavi ciascuna, sincronizzate
+Solver vs brute force      2.000 casi deterministici, 0 divergenze
+Browser reale a 320 px     29 controlli superati, 0 falliti
+git diff --check           superato, soli avvisi informativi LF/CRLF
+```
+
+Il warning Vite sui chunk grandi è preesistente e non bloccante.
+
+### 14.6 Smoke test browser riproducibile
+
+Lo script `frontend/scripts/check-equipment-browser.mjs` ora verifica anche:
+
+- profilo con cavo Technogym a pacco pesi e cavo Garage a dischi;
+- cambio dinamico `Pacco pesi` ↔ `Dischi sui perni` nell'editor;
+- label estese, assenza di overflow a 320 px e testi italiani;
+- target 60 kg, vuoto 10 kg, due punti: 25 kg per lato e 50 kg totali;
+- lo stesso caso con un punto: 50 kg sul perno;
+- pacco pesi: selezione di 60 kg senza suggerimenti per lato;
+- `role="status"` e `aria-live="polite"` sulla guida.
+
+Avviare Vite in un primo terminale:
+
+```powershell
+cd frontend
+npm.cmd run dev -- --host 127.0.0.1 --port 4173
+```
+
+Avviare un browser Chromium/Edge con un profilo temporaneo e remote debugging, quindi eseguire
+lo script in un secondo terminale. Esempio con Edge:
+
+```powershell
+$edge = 'C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe'
+$edgeArgs = @(
+  '--headless=new',
+  '--disable-gpu',
+  '--remote-debugging-port=9222',
+  '--user-data-dir=E:\Workspace\openGym\.edge-req7a-audit',
+  'about:blank'
+)
+Start-Process -FilePath $edge -ArgumentList $edgeArgs -WindowStyle Hidden
+
+cd frontend
+node scripts/check-equipment-browser.mjs
+```
+
+Nel runner gestito usato per questa verifica il processo GPU era bloccato dal sandbox di sistema;
+il test è stato quindi eseguito su Chromium 153, con profilo temporaneo, contenuto esclusivamente
+locale e sandbox browser disabilitato. Su un ambiente ordinario questa eccezione non è necessaria
+né raccomandata.
+
+### 14.7 Replica manuale funzionale
+
+1. Aprire **Impostazioni > Attrezzatura**, creare o modificare un profilo e aggiungere
+   **Macchina a cavo**.
+2. Selezionare **Pacco pesi**, inserire 60 kg tra i valori e salvarlo come `Cavo Technogym`.
+3. Aggiungere un secondo cavo, scegliere **Dischi sui perni**, resistenza a vuoto 10 kg, due punti,
+   inventario vuoto e salvarlo come `Cavo Garage`.
+4. Configurare un esercizio al cavo con `Cavo Garage`, target 60 kg, quindi avviare un nuovo
+   workout. La guida deve mostrare 25 kg su ciascun lato, 50 kg di dischi totali e nessun rapporto
+   pulegge applicato.
+5. Terminare/scartare il test, cambiare il cavo a un punto e avviare un nuovo workout: la guida
+   deve mostrare 50 kg sul perno e non deve contenere “su ciascun lato”.
+6. Selezionare `Cavo Technogym` e verificare che la guida chieda di selezionare 60 kg sul pacco
+   pesi, senza testo per lato.
+7. Lasciare entrambi gli attrezzi associati automaticamente a `cable`: l'app deve segnalare
+   l'ambiguità finché non si sceglie esplicitamente l'attrezzo dello slot.
+8. Avviare un workout con il cavo a due punti, poi modificare tara/punti nel profilo: il workout
+   già attivo deve conservare la vecchia guida; il successivo deve usare i nuovi valori.
+9. Usare lo stesso esercizio in due routine/giorni e assegnare due cavi differenti: ciascuna
+   sessione deve conservare il proprio attrezzo e il proprio snapshot.
+10. Ripetere a 320 px e con tema chiaro/scuro verificando che label e guida non siano troncate.
+
+### 14.8 Gate manuali residui
+
+Restano separati dai gate automatici, perché richiedono l'ambiente reale dell'utente:
+
+- rilascio e persistenza su CasaOS/Docker con il volume effettivo;
+- prova touch sul dispositivo usato in palestra;
+- lettura completa con screen reader reale;
+- verifica dei valori contro la specifica fisica della macchina, senza assumere rapporti di
+  pulegge non dichiarati;
+- prova con l'inventario reale dei dischi, se in futuro verrà censito.

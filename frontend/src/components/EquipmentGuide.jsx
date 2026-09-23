@@ -1,6 +1,6 @@
 import { fmtLoad } from '../lib/format.js'
 import { dateLocale, t } from '../lib/i18n.js'
-import { EQUIPMENT_KIND } from '../lib/equipment-load.js'
+import { CABLE_LOADING_MECHANISM, EQUIPMENT_KIND } from '../lib/equipment-load.js'
 import Icon from './Icon.jsx'
 
 const load = (value, unit) => `${fmtLoad(value)} ${unit}`
@@ -24,6 +24,31 @@ const candidate = (guide, value) => {
   }
   const plates = composition(value.composition, guide.unit)
   return `${base} (${plates}${guide.sideCount === 2 ? ' ' + t('per side') : ''})`
+}
+
+const plateLoadedCable = guide =>
+  guide?.cableLoadingMechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+
+const cableContext = guide => {
+  if (guide?.cableLoadingMechanism === CABLE_LOADING_MECHANISM.SELECTOR_STACK) {
+    return t('Cable · weight stack')
+  }
+  if (!plateLoadedCable(guide)) return null
+  return (guide.loadingPointCount || guide.sideCount) === 1
+    ? t('Plate-loaded cable · one loading point')
+    : t('Plate-loaded cable · {0} loading points', guide.loadingPointCount || guide.sideCount)
+}
+
+const cablePlateNote = (guide, manual = false) => {
+  const explicit = Number(guide.totalAddedWeight)
+  const totalAddedWeight = Number.isFinite(explicit)
+    ? Math.max(0, explicit)
+    : Math.max(0, (Number(guide.targetWeight) || 0) - (Number(guide.tareWeight) || 0))
+  return [
+    t('Total plates: {0}.', load(totalAddedWeight, guide.unit)),
+    ...(manual ? [t('Choose the plate combination manually.')] : []),
+    t('Pulley ratio is not applied.')
+  ].join(' ')
 }
 
 export function equipmentGuideCopy(guide) {
@@ -59,7 +84,22 @@ export function equipmentGuideCopy(guide) {
       }
     }
     if (guide.kind === EQUIPMENT_KIND.MACHINE_STACK) {
-      return { tone: 'success', icon: 'checkCircle', heading, detail: t('Select {0} on the machine stack.', load(guide.exact.weight, guide.unit)) }
+      return {
+        tone: 'success', icon: 'checkCircle', heading, context: cableContext(guide),
+        detail: t('Select {0} on the machine stack.', load(guide.exact.weight, guide.unit))
+      }
+    }
+    if (plateLoadedCable(guide)) {
+      const points = guide.loadingPointCount || guide.sideCount
+      return {
+        tone: 'success', icon: 'checkCircle', heading, context: cableContext(guide),
+        detail: guide.exact.composition.length
+          ? points === 1
+            ? t('Load {0} on the loading peg.', composition(guide.exact.composition, guide.unit))
+            : t('Load {0} on each side.', composition(guide.exact.composition, guide.unit))
+          : t('Use the cable at its empty resistance of {0}; no plates are needed.', load(guide.tareWeight, guide.unit)),
+        note: cablePlateNote(guide)
+      }
     }
     return {
       tone: 'success', icon: 'checkCircle', heading,
@@ -88,6 +128,16 @@ export function equipmentGuideCopy(guide) {
           : t('{0} dumbbells', guide.implementCount))
       }
     }
+    if (plateLoadedCable(guide)) {
+      const points = guide.loadingPointCount || guide.sideCount
+      return {
+        tone: 'success', icon: 'checkCircle', heading, context: cableContext(guide),
+        detail: points === 1
+          ? t('Load {0} on the loading peg.', pointLoad)
+          : t('Load {0} on each side.', pointLoad),
+        note: cablePlateNote(guide, true)
+      }
+    }
     return {
       tone: 'success', icon: 'checkCircle', heading,
       detail: guide.sideCount === 2
@@ -98,16 +148,19 @@ export function equipmentGuideCopy(guide) {
 
   if (guide.status === 'nearest') {
     return {
-      tone: 'warning', icon: 'info', heading,
+      tone: 'warning', icon: 'info', heading, context: cableContext(guide),
       detail: t('Not exactly loadable. Closest lower: {0}. Closest higher: {1}.',
         candidate(guide, guide.lower), candidate(guide, guide.upper)),
-      note: t('The workout target is unchanged; choose what to log.')
+      note: plateLoadedCable(guide)
+        ? `${t('The workout target is unchanged; choose what to log.')} ${t('Pulley ratio is not applied.')}`
+        : t('The workout target is unchanged; choose what to log.')
     }
   }
   if (guide.status === 'below_tare') {
     return {
-      tone: 'warning', icon: 'info', heading,
-      detail: t('The target is below the empty equipment weight of {0}.', load(guide.tareWeight, guide.unit))
+      tone: 'warning', icon: 'info', heading, context: cableContext(guide),
+      detail: t('The target is below the empty equipment weight of {0}.', load(guide.tareWeight, guide.unit)),
+      ...(plateLoadedCable(guide) ? { note: t('Pulley ratio is not applied.') } : {})
     }
   }
   if (guide.status === 'unit_mismatch') {
@@ -148,6 +201,7 @@ export default function EquipmentGuide({ guide, preview = false }) {
     <Icon name={copy.icon} />
     <div>
       {copy.heading && <strong>{copy.heading}</strong>}
+      {copy.context && <small className="equipment-guide-context">{copy.context}</small>}
       <span>{copy.detail}</span>
       {copy.note && <small>{copy.note}</small>}
     </div>

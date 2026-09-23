@@ -222,6 +222,137 @@ const manualWorkout = await evaluate(`(() => {
   }
 })()`)
 
+const cableSnapshot = {
+  schemaVersion: 1,
+  id: 'equipment-profile:cables',
+  name: 'Palestra cavi',
+  unit: 'kg',
+  workoutUnit: 'kg',
+  items: [{
+    id: 'cable-stack', label: 'Cavo Technogym', kind: 'machine_stack',
+    catalogEquipment: 'cable', tareWeight: 0, implementCount: 1, sideCount: 1,
+    denominations: [{ weight: 60, count: 1 }]
+  }, {
+    id: 'cable-plates', label: 'Cavo Garage', kind: 'plate_loaded_machine',
+    catalogEquipment: 'cable', tareWeight: 10, implementCount: 1, sideCount: 2,
+    denominations: []
+  }]
+}
+state.equipmentProfiles = [cableSnapshot]
+state.activeEquipmentProfileId = cableSnapshot.id
+state.active = null
+await saveState()
+await navigate('/?audit=cable-profile#/settings/equipment/equipment-profile%3Acables')
+await waitFor(
+  `document.body.innerText.includes('Cavo Technogym')
+    && document.body.innerText.includes('Cavo Garage')
+    && document.body.innerText.includes('Pacco pesi')
+    && document.body.innerText.includes('Dischi · 2 punti di carico')`,
+  'cable equipment profile'
+)
+const cableProfile = await evaluate(`(() => ({
+  text: document.body.innerText,
+  viewport: innerWidth,
+  scrollWidth: document.documentElement.scrollWidth
+}))()`)
+
+await evaluate(`(() => {
+  const row = [...document.querySelectorAll('.lrow')]
+    .find(node => node.innerText.includes('Cavo Garage'))
+  if (!row) throw new Error('Plate-loaded cable row not found')
+  row.click()
+})()`)
+await waitFor(
+  `document.querySelector('.sheet')?.innerText.includes('Come si carica questo cavo?') === true`,
+  'plate-loaded cable editor'
+)
+const cableEditor = await evaluate(`(() => {
+  const sheet = document.querySelector('.sheet')
+  return {
+    text: sheet?.innerText || '',
+    clientWidth: sheet?.clientWidth || 0,
+    scrollWidth: sheet?.scrollWidth || 0,
+    labels: [...sheet.querySelectorAll('label,.stp-l,.equipment-label')]
+      .map(node => node.textContent.trim()).filter(Boolean)
+  }
+})()`)
+
+await evaluate(`(() => {
+  const button = [...document.querySelectorAll('.sheet button')]
+    .find(node => node.textContent.trim() === 'Pacco pesi')
+  if (!button) throw new Error('Cable weight-stack option not found')
+  button.click()
+})()`)
+await waitFor(
+  `document.querySelector('.sheet')?.innerText.includes('Inserisci ogni valore indicato sul pacco pesi di questo cavo') === true`,
+  'switch cable to weight stack'
+)
+const cableStackEditorText = await evaluate(`document.querySelector('.sheet')?.innerText || ''`)
+await evaluate(`(() => {
+  const button = [...document.querySelectorAll('.sheet button')]
+    .find(node => node.textContent.trim() === 'Dischi sui perni')
+  if (!button) throw new Error('Plate-loaded cable option not found')
+  button.click()
+})()`)
+await waitFor(
+  `document.querySelector('.sheet')?.innerText.includes('Punti da caricare') === true`,
+  'switch cable back to plate loading'
+)
+const cablePlateEditorText = await evaluate(`document.querySelector('.sheet')?.innerText || ''`)
+
+const cableWorkout = (snapshot, itemId, label, kind, weight) => ({
+  id: `browser-audit-${itemId}`, d: '2026-09-22', start: Date.now(), routineId: null,
+  name: 'Cable browser audit', bw: null, cur: 0, equipmentSnapshot: snapshot,
+  entries: [{
+    id: '0007', target: { id: '0007', sets: 1, reps: 10, weight },
+    plan: { kind: 'off' },
+    equipmentUse: {
+      status: 'resolved', profileId: snapshot.id, itemId, kind, label,
+      catalogEquipment: 'cable', loadSemantics: 'total', implementCount: 1,
+      source: 'slot_override'
+    },
+    sets: [{ w: weight, r: 10, done: false }]
+  }]
+})
+
+state.active = cableWorkout(cableSnapshot, 'cable-plates', 'Cavo Garage', 'plate_loaded_machine', 60)
+await saveState()
+await navigate('/?audit=cable-two-points#/workout')
+await waitFor(
+  `document.querySelector('.equipment-guide.success')?.innerText.includes('Carica 25 kg su ciascun lato') === true`,
+  'two-point plate-loaded cable guide'
+)
+const cableTwoPoints = await evaluate(`(() => {
+  const guide = document.querySelector('.equipment-guide.success')
+  return {
+    text: guide?.innerText || '',
+    role: guide?.getAttribute('role') || '',
+    live: guide?.getAttribute('aria-live') || '',
+    viewport: innerWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }
+})()`)
+
+const onePointCableSnapshot = structuredClone(cableSnapshot)
+onePointCableSnapshot.items.find(item => item.id === 'cable-plates').sideCount = 1
+state.active = cableWorkout(onePointCableSnapshot, 'cable-plates', 'Cavo Garage', 'plate_loaded_machine', 60)
+await saveState()
+await navigate('/?audit=cable-one-point#/workout')
+await waitFor(
+  `document.querySelector('.equipment-guide.success')?.innerText.includes('Carica 50 kg sul perno') === true`,
+  'one-point plate-loaded cable guide'
+)
+const cableOnePoint = await evaluate(`document.querySelector('.equipment-guide.success')?.innerText || ''`)
+
+state.active = cableWorkout(cableSnapshot, 'cable-stack', 'Cavo Technogym', 'machine_stack', 60)
+await saveState()
+await navigate('/?audit=cable-stack#/workout')
+await waitFor(
+  `document.querySelector('.equipment-guide.success')?.innerText.includes('Seleziona 60 kg sul pacco pesi') === true`,
+  'selectorized cable guide'
+)
+const cableStack = await evaluate(`document.querySelector('.equipment-guide.success')?.innerText || ''`)
+
 const checks = {
   profileListVisible: profileList.text.includes('Palestra')
     && profileList.text.includes('Active equipment profile'),
@@ -249,10 +380,42 @@ const checks = {
     && manualWorkout.text.includes('53,5 kg di dischi per lato')
     && manualWorkout.text.includes('Componi il carico manualmente'),
   manualGuideAccessible: manualWorkout.role === 'status' && manualWorkout.live === 'polite',
-  manualGuideNoHorizontalOverflow: manualWorkout.scrollWidth <= manualWorkout.viewport
+  manualGuideNoHorizontalOverflow: manualWorkout.scrollWidth <= manualWorkout.viewport,
+  cableProfileDistinguishesMechanisms: cableProfile.text.includes('Pacco pesi')
+    && cableProfile.text.includes('Dischi · 2 punti di carico'),
+  cableProfileNoHorizontalOverflow: cableProfile.scrollWidth <= cableProfile.viewport,
+  cableEditorExplainsConvention: cableEditor.text.includes('Come si carica questo cavo?')
+    && cableEditor.text.includes('Il peso registrato è il totale della macchina')
+    && cableEditor.text.includes('Il rapporto delle pulegge non viene applicato')
+    && cableEditor.text.includes('non i pezzi per punto di carico')
+    && cableEditor.text.includes('carico per punto di carico'),
+  cableEditorFieldsReadable: ['Resistenza del cavo a vuoto', 'Punti da caricare']
+    .every(label => cableEditor.labels.includes(label)),
+  cableEditorNoHorizontalOverflow: cableEditor.scrollWidth <= cableEditor.clientWidth,
+  cableMechanismSwitchWorks: cableStackEditorText.includes('pacco pesi di questo cavo')
+    && !cableStackEditorText.includes('Punti da caricare')
+    && cablePlateEditorText.includes('Punti da caricare')
+    && cablePlateEditorText.includes('Il rapporto delle pulegge non viene applicato'),
+  cableTwoPointGuide: cableTwoPoints.text.includes('Obiettivo 60 kg · Cavo Garage')
+    && cableTwoPoints.text.includes('Cavo caricato a dischi · 2 punti di carico')
+    && cableTwoPoints.text.includes('Carica 25 kg su ciascun lato')
+    && cableTwoPoints.text.includes('Totale dischi: 50 kg')
+    && cableTwoPoints.text.includes('Il rapporto delle pulegge non viene applicato'),
+  cableTwoPointGuideAccessible: cableTwoPoints.role === 'status' && cableTwoPoints.live === 'polite',
+  cableTwoPointNoHorizontalOverflow: cableTwoPoints.scrollWidth <= cableTwoPoints.viewport,
+  cableOnePointGuide: cableOnePoint.includes('Cavo caricato a dischi · un punto di carico')
+    && cableOnePoint.includes('Carica 50 kg sul perno')
+    && !cableOnePoint.includes('su ciascun lato'),
+  cableStackGuide: cableStack.includes('Cavo · pacco pesi')
+    && cableStack.includes('Seleziona 60 kg sul pacco pesi')
+    && !cableStack.includes('su ciascun lato')
 }
 
-console.log(JSON.stringify({ checks, profileList, profileEditor, itemEditor, darkWorkout, lightWorkout, manualWorkout }, null, 2))
+console.log(JSON.stringify({
+  checks, profileList, profileEditor, itemEditor, darkWorkout, lightWorkout, manualWorkout,
+  cableProfile, cableEditor, cableStackEditorText, cablePlateEditorText,
+  cableTwoPoints, cableOnePoint, cableStack
+}, null, 2))
 failed = Object.values(checks).some(value => !value)
 } finally {
   try {

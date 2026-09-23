@@ -13,6 +13,16 @@ export const EQUIPMENT_KIND = Object.freeze({
 
 export const EQUIPMENT_KINDS = Object.freeze(Object.values(EQUIPMENT_KIND))
 
+/**
+ * Cable is a catalog category, not a load formula. These values identify the two
+ * cable presets supported by the editor while deliberately reusing the existing
+ * machine kinds (and therefore the existing snapshot/solver format).
+ */
+export const CABLE_LOADING_MECHANISM = Object.freeze({
+  SELECTOR_STACK: 'selector_stack',
+  PLATE_LOADED: 'plate_loaded'
+})
+
 export const LOAD_SEMANTICS = Object.freeze({
   TOTAL: 'total',
   PER_IMPLEMENT: 'per_implement',
@@ -49,6 +59,18 @@ const positiveInt = (value, fallback = 1, max = Number.MAX_SAFE_INTEGER) => {
 }
 const weightUnits = value => Math.round(roundWeight(value) * 100)
 const fromWeightUnits = value => Math.round(value) / 100
+
+/**
+ * Return the cable loading mechanism only when both the catalog category and the
+ * physical equipment kind make it explicit. In particular, never infer a stack
+ * or a plate-loaded machine from an exercise being categorised as `cable` alone.
+ */
+export function cableLoadingMechanism(item = {}) {
+  if (text(item?.catalogEquipment).toLowerCase() !== 'cable') return null
+  if (item?.kind === EQUIPMENT_KIND.MACHINE_STACK) return CABLE_LOADING_MECHANISM.SELECTOR_STACK
+  if (item?.kind === EQUIPMENT_KIND.PLATE_LOADED_MACHINE) return CABLE_LOADING_MECHANISM.PLATE_LOADED
+  return null
+}
 
 export const defaultLoadSemantics = kind => {
   if (kind === EQUIPMENT_KIND.LOADABLE_DUMBBELL || kind === EQUIPMENT_KIND.FIXED_WEIGHT) {
@@ -94,6 +116,30 @@ export function normalizeEquipmentItem(raw = {}, fallbackId = '') {
     denominations: normalizeDenominations(raw.denominations),
     ...(text(raw.instructions) ? { instructions: text(raw.instructions) } : {})
   }
+}
+
+/**
+ * Build a normalized cable preset without adding a new persisted kind. The
+ * caller supplies the local id (and normally a user-facing label) in `overrides`.
+ * Unknown fields such as a speculative pulley ratio are intentionally discarded
+ * by normalization: 7A reports physical plate mass and performs no resistance
+ * conversion.
+ */
+export function createCableEquipmentPreset(mechanism, overrides = {}) {
+  const kind = mechanism === CABLE_LOADING_MECHANISM.SELECTOR_STACK
+    ? EQUIPMENT_KIND.MACHINE_STACK
+    : mechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+      ? EQUIPMENT_KIND.PLATE_LOADED_MACHINE
+      : null
+  if (!kind) return null
+  return normalizeEquipmentItem({
+    ...overrides,
+    kind,
+    catalogEquipment: 'cable',
+    ...(kind === EQUIPMENT_KIND.MACHINE_STACK
+      ? { tareWeight: 0, sideCount: 1 }
+      : { sideCount: Number(overrides.sideCount) === 1 ? 1 : 2 })
+  })
 }
 
 export function normalizeEquipmentProfile(raw = {}) {
@@ -359,10 +405,23 @@ export function calculateLoadingGuide({ profile: rawProfile, equipmentUse = {}, 
   const item = profile.items.find(candidate => candidate.id === equipmentUse.itemId)
   if (!item) return { status: 'unavailable', reason: 'missing_item' }
 
+  const cableMechanism = cableLoadingMechanism(item)
+  const plateLoadedCable = cableMechanism === CABLE_LOADING_MECHANISM.PLATE_LOADED
+
   const base = {
     targetWeight: roundWeight(target), unit, itemId: item.id, itemLabel: item.label,
     kind: item.kind, loadSemantics: equipmentUse.loadSemantics || defaultLoadSemantics(item.kind),
-    implementCount: positiveInt(equipmentUse.implementCount, item.implementCount, MAX_IMPLEMENT_COUNT)
+    implementCount: positiveInt(equipmentUse.implementCount, item.implementCount, MAX_IMPLEMENT_COUNT),
+    ...(item.catalogEquipment ? { catalogEquipment: item.catalogEquipment } : {}),
+    ...(cableMechanism ? { cableLoadingMechanism: cableMechanism } : {}),
+    ...(plateLoadedCable ? {
+      loadingPointCount: item.sideCount,
+      loadConvention: LOAD_SEMANTICS.TOTAL,
+      totalAddedWeight: fromWeightUnits(Math.max(0, weightUnits(target) - weightUnits(item.tareWeight))),
+      // This guide describes the physical mass put on the loading points. A pulley
+      // ratio is machine-specific and must never be guessed from the exercise type.
+      pulleyRatioApplied: false
+    } : {})
   }
   if (base.loadSemantics !== defaultLoadSemantics(item.kind)) {
     return { ...base, status: 'unsupported', reason: 'incompatible_load_semantics' }
