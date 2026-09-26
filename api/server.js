@@ -9,6 +9,7 @@ import {
   generateAuthenticationOptions, verifyAuthenticationResponse
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
+import { createStateStore, StateStoreError, SYNC_PROTOCOL } from './state-store.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -47,10 +48,14 @@ function atomicWrite(file, content) {
   fs.writeFileSync(tmp, content);
   fs.renameSync(tmp, file);
 }
-const stateFile = uid => path.join(DATA, 'state-' + uid.replace(/[^a-zA-Z0-9_-]/g, '') + '.json');
-function readState(uid) {
-  try { return JSON.parse(fs.readFileSync(stateFile(uid), 'utf8')); } catch { return null; }
+const stateStore = createStateStore({ dataDir: DATA, atomicWrite });
+// Existing reminder/admin consumers deliberately keep seeing the logical application state;
+// revision receipts and other sync metadata remain an implementation detail of stateStore.
+function readStateRecord(uid) {
+  try { return stateStore.readRecord(uid); }
+  catch { return { state: null, revision: 0, updatedAt: null, receipts: [], legacy: false }; }
 }
+const readState = uid => readStateRecord(uid).state;
 
 /* ---------- push notifications (Web Push / VAPID) ---------- */
 const vapidFile = path.join(DATA, 'vapid.json');
@@ -223,15 +228,19 @@ function json(res, code, obj, extraHeaders) {
 }
 function readBody(req) {
   return new Promise((resolve, reject) => {
-    let size = 0; const chunks = [];
+    let size = 0; const chunks = []; let bodyError = null;
     req.on('data', d => {
       size += d.length;
-      if (size > MAX_BODY) { reject(new Error('body too large')); req.destroy(); return; }
+      if (size > MAX_BODY) {
+        bodyError ||= new StateStoreError(413, 'payload_too_large', 'request body exceeds 5 MiB');
+        return;
+      }
       chunks.push(d);
     });
     req.on('end', () => {
+      if (bodyError) return reject(bodyError);
       try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {}); }
-      catch { reject(new Error('bad json')); }
+      catch { reject(new StateStoreError(400, 'invalid_json', 'request body is not valid JSON')); }
     });
     req.on('error', reject);
   });
@@ -375,20 +384,21 @@ const routes = {
   'GET /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
-    try {
-      const state = JSON.parse(fs.readFileSync(stateFile(user.id), 'utf8'));
-      json(res, 200, { state });
-    } catch { json(res, 200, { state: null }); }
+    const record = stateStore.readRecord(user.id);
+    json(res, 200, { state: record.state, revision: record.revision, syncProtocol: SYNC_PROTOCOL }, {
+      ETag: `"opengym-state-${record.revision}"`,
+      'X-OpenGym-Sync-Protocol': String(SYNC_PROTOCOL)
+    });
   },
 
   'PUT /api/data': async (req, res) => {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
-    if (!body.state || typeof body.state !== 'object') return json(res, 400, { error: 'state required' });
-    delete body.state.active;              // in-progress workouts stay device-local
-    atomicWrite(stateFile(user.id), JSON.stringify(body.state));
-    json(res, 200, { ok: true, ts: body.state._ts || null });
+    const result = stateStore.putState(user.id, body);
+    json(res, 200, { ok: true, ...result, syncProtocol: SYNC_PROTOCOL }, {
+      'X-OpenGym-Sync-Protocol': String(SYNC_PROTOCOL)
+    });
   },
 
   'GET /api/push/public-key': async (req, res) => json(res, 200, { key: vapid.publicKey }),
@@ -460,7 +470,8 @@ const routes = {
   'GET /api/admin/users': async (req, res) => {
     if (!requireAdmin(req, res)) return;
     const users = db.users.map(u => {
-      const S = readState(u.id) || {};
+      const record = readStateRecord(u.id);
+      const S = record.state || {};
       const workouts = S.workouts || [];
       const last = workouts[workouts.length - 1];
       return {
@@ -468,7 +479,7 @@ const routes = {
         disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null,
         workouts: workouts.length,
         lastWorkout: last ? last.d : null,
-        lastSync: S._ts || null,
+        lastSync: record.updatedAt || S._ts || null,
         hasPush: db.subs.some(s => s.userId === u.id),
         live: livePresence(u.id)
       };
@@ -482,11 +493,12 @@ const routes = {
     const id = new URL(req.url, 'http://x').searchParams.get('id');
     const u = db.users.find(x => x.id === id);
     if (!u) return json(res, 404, { error: 'no such user' });
-    const S = readState(u.id) || {};
+    const record = readStateRecord(u.id);
+    const S = record.state || {};
     json(res, 200, {
       user: { id: u.id, name: u.name, created: u.created || null, disabled: !!u.disabled, admin: isAdmin(u), invitedBy: u.invitedBy || null },
       unit: S.unit || 'kg',
-      lastSync: S._ts || null,
+      lastSync: record.updatedAt || S._ts || null,
       routines: (S.routines || []).map(r => ({ id: r.id, name: r.name, emoji: r.emoji, count: (r.ex || []).length })),
       bodyweight: S.bodyweight || [],
       workouts: (S.workouts || []).slice().reverse()   // newest first for display
@@ -548,6 +560,14 @@ http.createServer(async (req, res) => {
   if (!handler) return json(res, 404, { error: 'not found' });
   try { await handler(req, res); }
   catch (e) {
+    if (e instanceof StateStoreError) {
+      return json(res, e.status, {
+        error: e.code,
+        message: e.message,
+        ...e.details,
+        syncProtocol: SYNC_PROTOCOL
+      }, { 'X-OpenGym-Sync-Protocol': String(SYNC_PROTOCOL) });
+    }
     console.error(key, e);
     if (!res.headersSent) json(res, 500, { error: 'server error' });
   }

@@ -5,11 +5,48 @@ export const BIO = IS_APPLE ? 'Face ID / Touch ID' : IS_ANDROID ? 'fingerprint o
 export const VAULT = IS_APPLE ? 'iCloud Keychain' : IS_ANDROID ? 'Google Password Manager' : 'your password manager'
 export const webauthnOK = () => !!(window.PublicKeyCredential && navigator.credentials)
 
-export async function api(path, opts) {
-  const r = await fetch(path, Object.assign({ headers: { 'Content-Type': 'application/json' } }, opts))
-  const data = await r.json().catch(() => ({}))
-  if (!r.ok) { const e = new Error(data.error || ('HTTP ' + r.status)); e.status = r.status; throw e }
-  return data
+const DEFAULT_API_TIMEOUT_MS = 12_000
+
+// API calls must eventually yield back to the offline queue. A browser can report itself as
+// online while CasaOS/the API is unreachable, so waiting for fetch indefinitely would also stop
+// automatic retries and leave the sync indicator lying about what is happening.
+export async function api(path, opts = {}) {
+  const { timeout = DEFAULT_API_TIMEOUT_MS, signal: callerSignal, ...request } = opts
+  const controller = new AbortController()
+  let timedOut = false
+  const abort = () => controller.abort(callerSignal?.reason)
+  if (callerSignal) {
+    if (callerSignal.aborted) abort()
+    else callerSignal.addEventListener('abort', abort, { once: true })
+  }
+  const timer = setTimeout(() => { timedOut = true; controller.abort() }, timeout)
+
+  try {
+    const r = await fetch(path, Object.assign(
+      { headers: { 'Content-Type': 'application/json' } },
+      request,
+      { signal: controller.signal }
+    ))
+    const data = await r.json().catch(() => ({}))
+    if (!r.ok) {
+      const e = new Error(data.error || ('HTTP ' + r.status))
+      e.status = r.status
+      e.data = data
+      throw e
+    }
+    return data
+  } catch (error) {
+    if (timedOut) {
+      const e = new Error('Request timed out')
+      e.code = 'API_TIMEOUT'
+      e.cause = error
+      throw e
+    }
+    throw error
+  } finally {
+    clearTimeout(timer)
+    if (callerSignal) callerSignal.removeEventListener('abort', abort)
+  }
 }
 
 const bufToB64u = buf => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')

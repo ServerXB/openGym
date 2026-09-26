@@ -14,6 +14,7 @@ import ErrorBoundary from './components/ErrorBoundary.jsx'
 import Modals from './components/Modals.jsx'
 import Toast from './components/Toast.jsx'
 import RestTimer from './components/RestTimer.jsx'
+import SyncStatus from './components/SyncStatus.jsx'
 import Login from './views/Login.jsx'
 import Home from './views/Home.jsx'
 import Plan from './views/Plan.jsx'
@@ -66,7 +67,8 @@ function Shell() {
           re-mounts the boundary, so the tab bar is always a way out */}
       <div id="app" className="vfade" key={loc.pathname}>
         <ErrorBoundary>
-          {!authed ? <Login /> : (
+          {!authed ? <Login /> : (<>
+            <SyncStatus />
             <Routes>
               <Route path="/home" element={<Home />} />
               <Route path="/plan" element={<Plan />} />
@@ -81,7 +83,7 @@ function Shell() {
               <Route path="/admin" element={user?.admin ? <Admin /> : <Navigate to="/home" replace />} />
               <Route path="*" element={<Navigate to="/home" replace />} />
             </Routes>
-          )}
+          </>)}
         </ErrorBoundary>
       </div>
       <TabBar onStart={startFlow} />

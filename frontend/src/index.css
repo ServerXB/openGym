@@ -960,6 +960,31 @@ h4.sec{
 .pr .icn{font-size:13px}
 
 /* --- toast --- */
+.syncbar{
+  margin:0 auto 12px;max-width:640px;border-radius:12px;padding:8px 11px;
+  background:var(--surface);box-shadow:inset 0 0 0 var(--hair) var(--sep-op);
+  color:var(--label-2);font-size:12px;line-height:1.35;
+}
+.syncbar-main{display:flex;align-items:center;gap:8px;min-width:0}
+.syncbar-dot{width:7px;height:7px;flex:none;border-radius:50%;background:var(--label-3)}
+.syncbar-label{flex:1;min-width:0}
+.syncbar.synced .syncbar-dot{background:var(--green)}
+.syncbar.syncing .syncbar-dot{background:var(--blue);animation:syncpulse 1s ease-in-out infinite}
+.syncbar.pending .syncbar-dot,.syncbar.offline_local .syncbar-dot,.syncbar.offline .syncbar-dot,.syncbar.error .syncbar-dot{background:var(--orange)}
+.syncbar.conflict .syncbar-dot,.syncbar.auth_required .syncbar-dot,.syncbar.storage_error .syncbar-dot{background:var(--red)}
+.syncbar-action{
+  flex:none;color:var(--acc);font:inherit;font-weight:600;padding:4px 3px;
+  text-decoration:underline;text-underline-offset:2px;
+}
+.syncbar-note{padding:5px 15px 1px;color:var(--label-3)}
+.syncbar-details{margin-top:8px;padding-top:9px;border-top:var(--hair) solid var(--sep-op)}
+.syncbar-details p{margin:0 0 7px}
+.syncbar-paths{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:9px}
+.syncbar-paths code{max-width:100%;overflow:hidden;text-overflow:ellipsis;background:var(--surface-2);border-radius:5px;padding:2px 5px}
+.syncbar-buttons{display:flex;flex-wrap:wrap;gap:6px}
+.syncbar-buttons button{background:var(--surface-2);border-radius:7px;padding:6px 8px;color:var(--label);font-size:12px}
+@keyframes syncpulse{50%{opacity:.35}}
+
 #toast{
   position:fixed;left:50%;transform:translateX(-50%) translateY(6px);
   bottom:calc(96px + var(--sab));z-index:200;

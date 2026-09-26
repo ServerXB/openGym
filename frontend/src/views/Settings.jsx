@@ -18,6 +18,7 @@ export default function Settings() {
   const nav = useNavigate()
   const S = useStore(s => s.S)
   const user = useStore(s => s.user)
+  const sync = useStore(s => s.sync)
   const { update, replaceState, setUser, pullState, pushState, signOut, signOutAll, resetDemo } = useStore()
   const toast = useUI(s => s.toast)
   const fileRef = useRef(null)
@@ -51,6 +52,16 @@ export default function Settings() {
   const signInHere = async () => {
     try { const u = await passkeyLogin(); setUser(u); await pullState(); toast(t('Welcome back, {0}', u.name)) }
     catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast(e.message || t('Sign-in failed')) }
+  }
+  const signOutHere = async () => {
+    try {
+      await signOut()
+      nav('/home')
+    } catch (e) {
+      toast(e?.code === 'SYNC_PENDING'
+        ? t('Could not sign out — sync or export the pending changes first.')
+        : t('Could not sign out — you are still signed in.'))
+    }
   }
   const registerHere = () => useUI.getState().openSheet(close => <RegisterInline close={close} setUser={setUser} pushState={pushState} pullState={pullState} toast={toast} />)
   // Ends the profile's sessions on every device — this one included, so on success it lands in
@@ -86,8 +97,11 @@ export default function Settings() {
           onClick={() => window.open(REPO, '_blank', 'noopener')} />
       </> : user ? <>
         <Row icon="personCircle" iconTint="var(--grey)" title={user.name} subtitle={t('Signed in with passkey — data syncs to this profile.')} />
+        {sync?.status === 'auth_required' && <Row icon="lock" iconTint="var(--orange)"
+          title={t('Sign in again to sync')} subtitle={t('Your local changes are safe on this device.')}
+          accessory="chevron" onClick={signInHere} />}
         {user.admin && <Row icon="wrench" iconTint="var(--indigo)" title={t('Admin dashboard')} accessory="chevron" onClick={() => nav('/admin')} />}
-        <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: () => { signOut(); nav('/home') } })} />
+        <Row icon="signOut" iconTint="var(--red)" title={t('Sign out')} danger onClick={() => confirmSheet({ title: t('Sign out?'), message: t('Your data is synced to your profile first, then cleared from this device.'), confirmText: t('Sign out'), danger: true, onConfirm: signOutHere })} />
         <Row icon="shield" iconTint="var(--red)" title={t('Sign out everywhere')} subtitle={t('Ends this profile’s sessions on all your devices.')} danger onClick={signOutEverywhere} />
       </> : webauthnOK() ? <>
         <Row icon="sparkles" iconTint="var(--acc)" title={t('Create passkey profile')} subtitle={t('Keeps your data safe and separate per person.')} accessory="chevron" onClick={registerHere} />

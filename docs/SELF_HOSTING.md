@@ -118,6 +118,43 @@ tar czf opengym-backup-$(date +%F).tar.gz data/
 That archive contains all profiles, passkeys and workout history. Restore by unpacking it back
 into the project folder. (Individual users can also export their own data as JSON from Settings.)
 
+The per-user state files also contain the server revision and recent idempotency receipts used by
+safe synchronization. Back up and restore the whole `data/` directory, rather than copying only
+the logical workout JSON, so a retry after a restart cannot be applied twice.
+
+### Offline use and synchronization
+
+After a profile has signed in and loaded successfully at least once, its browser copy is the
+working replica. If the API or CasaOS is unavailable, edits and completed workouts remain on that
+device, survive refresh/restart, and are retried with backoff when the API returns. The compact
+status bar distinguishes local-only, pending, syncing, synchronized, authentication-required,
+storage-error and conflict states.
+
+Cold-starting the app while the whole web container is down requires both:
+
+1. a previous successful online load of the current build; and
+2. a secure browser context (HTTPS, or `localhost`) so the service worker can install.
+
+`http://<LAN-IP>:<port>` is not a secure context on a phone. An already-open tab can still keep
+local data, but reopening the PWA with the frontend unavailable is only guaranteed through HTTPS.
+Exercise images and animations are cached on demand, not precached; missing media never blocks the
+workout itself.
+
+Synchronization uses a monotonic per-user server revision and compare-and-swap writes. Independent
+changes from two devices are merged; incompatible edits are kept as two downloadable copies until
+the user chooses. Signing out is refused while local changes are still pending, so retry sync or
+export a JSON backup first. API responses and profile JSON are never stored in the service-worker
+cache.
+
+The browser replica uses the site's local storage and deliberately keeps enough information for a
+three-way merge. Very large histories can therefore reach a browser-specific quota before the
+server's 5 MiB request limit. If the status bar reports a local storage error, stop editing and
+export a backup; openGym will not replace the unreadable or unsaved profile with empty defaults.
+
+The JSON-file backend supports one API process writing the mounted `data/` directory. Do not run
+multiple API replicas against that directory: horizontal replication requires an external database
+or distributed lock and is not provided by this release.
+
 ## 6. Notifications
 
 openGym can push two kinds of alert to your phone/desktop, even when the app isn't open:
@@ -150,8 +187,9 @@ git pull
 docker compose up -d --build
 ```
 
-The app shell is versioned (`?v=N`) so clients pick up changes on next load. Your `./data` and the
-downloaded media are untouched.
+The production build fingerprints and precaches its complete app shell. A new service worker is
+activated only after every shell asset has been cached, so an interrupted update keeps the previous
+offline-capable version. Your `./data` and the downloaded media are untouched.
 
 ## Troubleshooting
 
@@ -162,6 +200,9 @@ downloaded media are untouched.
 | Media didn't download | `docker compose logs media`. Re-run `docker compose up -d`, or run `./scripts/fetch-media.sh`. |
 | Port 8080 already used | Set `WEB_PORT=9090` in `.env` (and update `ORIGIN` for local testing). |
 | No "Notifications" option in Settings | Requires a signed-in profile and HTTPS (or `localhost`) — guest mode and plain HTTP over LAN can't subscribe. |
+| App does not reopen while CasaOS is down | Install/load it once over HTTPS (or `localhost`). Service workers cannot provide cold-start offline support on a plain LAN-IP HTTP URL. |
+| Sync says changes are pending | Leave the app open or tap **Sync now** after the API returns. Do not clear site data; export a JSON backup before any destructive recovery. |
+| Sync reports a conflict | Export either copy if desired, review the listed fields, then choose this device or the server/other-device copy. Non-conflicting changes are already merged. |
 | Day reminder fires at the wrong time | Toggle it off and on in Settings so it re-detects your browser's timezone (also happens automatically on every app load — see section 6). |
 | Want to reset a stuck login | Delete the cookie in your browser; sessions are just signed cookies. |
 | `docker compose pull` fails with "denied" / "unauthorized" | The GHCR packages may have been made private. Build from source instead: `docker compose up -d --build`. |
