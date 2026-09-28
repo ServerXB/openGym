@@ -539,7 +539,7 @@ describe('Confirmed Rep-Range progression', () => {
       entries: [{
         id: LIFT,
         target: {
-          ...cfg, ...(x.snapshot || {}),
+          ...cfg, restBaseSeconds: 120, ...(x.snapshot || {}),
           sets: x.planned ?? x.snapshot?.sets ?? cfg.sets,
           reps: x.target, targetReps: x.target,
           restSeconds: x.rest ?? 120, topRangeStreak: x.streak ?? 0
@@ -576,7 +576,7 @@ describe('Confirmed Rep-Range progression', () => {
       weight: 70,
       reps: 12,
       topRangeStreak: 1,
-      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
+      why: ['Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same load and recovery to increase weight.']
     })
   })
 
@@ -1003,7 +1003,7 @@ describe('Confirmed Rep-Range progression', () => {
       weight: 0,
       reps: 12,
       topRangeStreak: 1,
-      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more to complete the progression step.']
+      why: ['Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same recovery to complete the progression step.']
     })
     expect(JSON.stringify(S.workouts)).toBe(historyBefore)
   })

@@ -2,6 +2,15 @@
 // dictionaries deliberately share the same key set (checked by scripts/check-locales.mjs),
 // so untranslated languages carry an explicit English fallback until native copy is added.
 const KEYS = [
+  'Maximum reached, but progression is paused until recovery returns to its base of {0}s. No maximum confirmations are counted above base.',
+  'Recovery is at its base of {0}s. Complete two new maximum-rep sessions at this recovery to progress; earlier confirmations do not count.',
+  'Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same load and recovery to increase weight.',
+  'Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same recovery to complete the progression step.',
+  'Recovery raised to its configured base of {0}s.',
+  'Add one rep after a clean session. Return to base recovery before confirming the maximum twice to progress; later-set misses add recovery time.',
+  'Recovery follows this progression, including routines that share it. Only future workouts are affected; weight, target reps and completed workouts stay unchanged. Maximum confirmations and the automatic recovery count restart.',
+  'Changing the initial recovery takes effect after Save. It does not reset a higher effective recovery; future recovery cannot go below the new base. Maximum confirmations must be earned at the new base.',
+  'With automatic reduction disabled, use the manual reset to return to base recovery before confirming the maximum.',
   'Progression history',
   'Optional',
   'Use {0} sets from the next workout',

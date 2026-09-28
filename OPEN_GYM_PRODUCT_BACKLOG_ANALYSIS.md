@@ -1,14 +1,14 @@
 # openGym — Analisi funzionale e architetturale del backlog prodotto
 
-- Data: 2026-09-26
+- Data: 2026-09-28
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Revisione del codice verificata: `1963555`
-- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12 e 14
+- Revisione del codice verificata: `6279f0a`, con hardening successivo pronto per commit
+- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12, 14 e 15
 - Ambito: requisiti 1–17 e relativa estensione 7A comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: cavo a pacco pesi e cavo caricato a dischi distinti, con guida esplicita per punto/lato
+- Ultimo aggiornamento funzionale: correzione Confirmed recovery-first (prima recupero base, poi due conferme massime); replica offline e sincronizzazione revisionata restano implementate
 - Ultimo aggiornamento backlog: aggiunti il requisito 16, storico delle ultime quattro sessioni nel workout, e il requisito 17, rilevazione dello stallo Confirmed con riduzione controllata del carico; solo analisi, sviluppo non autorizzato
-- Priorità di sviluppo: il requisito 15 è proposto come P0 per il rischio di perdita silenziosa dei dati; fino a validazione della nuova priorità il primo requisito approvato resta 2A; il requisito 13 non è ancora autorizzato allo sviluppo; i requisiti 8 e 9 restano esclusi
+- Priorità di sviluppo: chiuso il requisito 15, il prossimo requisito approvato è 2A; seguono 16, 17, 4 e 10; il requisito 13 non è ancora autorizzato allo sviluppo e i requisiti 8 e 9 restano esclusi
 
 ## 1. Obiettivo
 
@@ -46,22 +46,22 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 12 | Orario/data inizio e fine | **Completato** | Lifecycle deterministico, UI localizzata, import e lettura legacy | P1 | Piccola/Media |
 | 13 | Riscaldamento specifico guidato | **Non completato** | Analisi funzionale pronta; sviluppo non ancora autorizzato | P1 proposta | Media |
 | 14 | Richiesta del peso corporeo configurabile | **Completato** | Switch persistente nelle Impostazioni; opt-out salta il popup senza alterare le misurazioni | P1 | Piccola |
-| 15 | Funzionamento offline e sync alla riconnessione | **Non completato** | Persistenza locale e cache runtime sono solo fondazioni parziali; mancano cold start garantito, retry, revisioni, merge e conflitti sicuri | P0 proposta | Grande/Epic |
+| 15 | Funzionamento offline e sync alla riconnessione | **Completato** | App shell precacheata, replica per account, CAS/idempotenza, retry, merge a tre vie, conflitti e logout sicuro | P0 | Grande/Epic |
 | 16 | Ultime quattro sessioni durante il workout | **Non completato** | Esiste soltanto la riga “Ultima volta”; manca una vista scoped, completa e richiamabile delle quattro sessioni precedenti | P1 | Piccola/Media |
 | 17 | Rilevazione stallo Confirmed e riduzione controllata del carico | **Non completato** | Confirmed mantiene indefinitamente carico/target e adatta solo il recupero; non esiste un segnale di qualità tecnica né una regressione spiegabile | P1 proposta | Grande |
 
 `Completato` significa che lo scope concordato è presente nel codice ed è coperto da test
-automatici. La colonna `Commit principale` distingue ciò che è già committato dallo stato
-transitorio “pronto per il commit”; 7A è in questo stato perché è stato richiesto di fermarsi
-prima di ogni commit. `Non completato` resta il valore anche quando esiste una fondazione
+automatici. La colonna `Commit principale` distingue ciò che è già committato dall'eventuale
+hardening successivo ancora “pronto per il commit”; 7A è committato in `ca68f78` e il nucleo del
+requisito 15 in `6279f0a`. `Non completato` resta il valore anche quando esiste una fondazione
 parziale: in questo modo la colonna risponde in modo binario alla domanda “è implementato o no?”.
 I collaudi manuali su CasaOS, dispositivi fisici, screen reader e provider reali restano gate
 separati e non vengono confusi con lo stato dell'implementazione.
 
 ### 2.1 Evidenze dell'audit di implementazione
 
-Audit aggiornato il 2026-09-23 sulla revisione `ca68f78`. La regressione automatica corrente è
-verde: **37/37 file di test e 635/635 test**; anche
+Audit aggiornato il 2026-09-28 sulla revisione `6279f0a` e relativo hardening. La regressione automatica corrente è
+verde: **47/47 file di test e 759/759 test**; anche
 la build Vite di produzione termina con
 successo. Resta il warning non bloccante già noto sui chunk di grandi dimensioni.
 
@@ -75,12 +75,12 @@ successo. Resta il warning non bloccante già noto sui chunk di grandi dimension
 | 11 | `2ba04d0` | `progression.js`, `workout-set-status.js` e matrice Confirmed 4×8–10 |
 | 12 | `a438f11` | `workout-time.js`, lifecycle, import e rendering storico |
 | 14 | `1963555` | setting persistente, compatibilità legacy e start flow pianificato/freestyle |
+| 15 | `6279f0a`, hardening pronto | app shell offline, storage per account, CAS/idempotenza, merge, retry, conflitti e UX sync |
 
 Per i requisiti non completati l'audit ha verificato anche l'assenza dello scope richiesto, non
 soltanto la mancanza di un'etichetta nel backlog: 2A non persiste il timer, 2B non ha stato server
 duraturo, 2C non ha companion, 3 non ha contratto API pubblico, 4 non ha rail, 10 non ha alias
-utente, 8/9 non hanno provider, 13 non ha ancora motore o popup, 15 non ha un'app shell
-precacheata né un protocollo di riconciliazione revisionato, 16 non ha una vista delle quattro
+utente, 8/9 non hanno provider, 13 non ha ancora motore o popup, 16 non ha una vista delle quattro
 sessioni e 17 non ha rilevazione o reset del carico Confirmed.
 
 Le correzioni 6 e 11 sono state affrontate prima del requisito 7 perché decidono quale storico
@@ -1186,16 +1186,23 @@ Effetti al limite superiore:
 
 - ogni sessione nella quale tutte le serie prescritte raggiungono almeno `maxReps` è un
   `topRangeSuccess`, anche se il target snapshot era più basso;
-- il primo `topRangeSuccess` porta il prossimo target a `maxReps` e registra
-  `topRangeStreak = 1`;
-- il secondo `topRangeSuccess` consecutivo, con lo stesso `progressionId`, range e working load,
-  completa la conferma;
+- sopra il recupero base, il target può raggiungere `maxReps` ma `topRangeStreak` resta zero:
+  prima si rientra alla base, poi si conferma il massimo;
+- il primo `topRangeSuccess` con recupero e base storici espliciti uguali alla base corrente,
+  nella stessa epoch del reset, porta il prossimo target a `maxReps` e registra `topRangeStreak = 1`;
+- il secondo `topRangeSuccess` consecutivo alle stesse condizioni di recupero e con lo stesso
+  `progressionId`, range e working load, completa la conferma;
 - per un esercizio caricato, la seconda conferma applica esattamente l'incremento configurato e
   riporta il target a `minReps`;
 - la conferma consumata viene azzerata (`topRangeStreak = 0`) dopo l'aumento;
 - per il corpo libero puro, il riconoscimento del livello segue la stessa regola, mentre l'azione
   successiva alla conferma resta quella specifica già prevista dalla strategia e non introduce
   automaticamente una zavorra.
+
+La tabella seguente assume recupero già alla base e snapshot validi. Il reset manuale riavvia
+anche le conferme massime; una riduzione alla base non converte la sessione a recupero maggiorato
+in una conferma alla base. Dettagli, compatibilità e test della correzione del 2026-09-28:
+[report recovery-first](CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md).
 
 | Target | Serie reali | Livello validato | Prossima prescrizione attesa |
 |---:|---|---:|---|
@@ -1673,11 +1680,13 @@ popup. Il gate manuale residuo è la verifica del flusso su dispositivo/CasaOS r
 
 ### 5.15 Funzionamento offline e sincronizzazione alla riconnessione
 
-#### Stato attuale e rischio
+#### Stato attuale e rischio eliminato
 
-**Non completato. Analisi pronta; sviluppo non autorizzato.**
+**Completato e validato automaticamente il 2026-09-28.** Commit principale `6279f0a`; gli
+ultimi hardening emersi dall'audit sono pronti per un commit correttivo dedicato. I punti sotto
+registrano i rischi del comportamento precedente che l'implementazione ha eliminato.
 
-openGym possiede già alcune fondazioni utili:
+Prima della release openGym possedeva alcune fondazioni utili:
 
 - lo stato applicativo e l'allenamento attivo vengono salvati in `localStorage`;
 - il boot conserva la copia locale quando l'API non è raggiungibile;
@@ -1685,8 +1694,9 @@ openGym possiede già alcune fondazioni utili:
 - un push fallito imposta il flag booleano `gym_dirty`;
 - la build mobile standalone è local-only e non dipende dal server.
 
-Queste fondazioni permettono spesso di continuare in una scheda già aperta, ma non costituiscono
-una modalità offline affidabile. L'audit ha rilevato i seguenti problemi:
+Queste fondazioni permettevano spesso di continuare in una scheda già aperta, ma non costituivano
+una modalità offline affidabile. L'audit pre-implementazione aveva rilevato i seguenti problemi,
+ora coperti dal requisito 15:
 
 1. il service worker non precachea l'app shell, quindi una riapertura a freddo con l'intero host
    fermo non è garantita;
@@ -1707,9 +1717,9 @@ una modalità offline affidabile. L'audit ha rilevato i seguenti problemi:
    poi rimosso dal payload persistito;
 10. errori di rete, timeout, `401`, conflitto e storage pieno non hanno stati UX distinti.
 
-Il rischio non è soltanto di usabilità: oggi un dispositivo rimasto offline può tornare online e
-sovrascrivere integralmente dati più recenti presenti sul server. Per questo la priorità proposta
-è **P0**, da validare prima di cambiare l'ordine di sviluppo già approvato.
+Il rischio non era soltanto di usabilità: un dispositivo rimasto offline poteva tornare online e
+sovrascrivere integralmente dati più recenti presenti sul server. Questo rischio ha motivato la
+priorità **P0** e il protocollo revisionato ora impedisce quel `PUT` cieco.
 
 #### Scope e limiti della prima release
 
@@ -1757,9 +1767,9 @@ La soluzione raccomandata è la più piccola che impedisce la perdita silenziosa
 subito tutti i mutatori come eventi. Background Sync può essere aggiunto, ma la correttezza non
 deve dipendere dalla sua disponibilità.
 
-#### Modello locale e protocollo raccomandati
+#### Modello locale e protocollo implementati
 
-La copia locale diventa la replica operativa. Una modifica è `salvata su questo dispositivo` solo
+La copia locale è la replica operativa. Una modifica è `salvata su questo dispositivo` solo
 dopo una scrittura locale riuscita; è `sincronizzata` soltanto dopo l'ack del server per quella
 precisa generazione.
 
@@ -1767,25 +1777,34 @@ Metadati locali, separati dal JSON di dominio e dai backup utente:
 
 ```json
 {
-  "syncProtocol": 1,
-  "userId": "user-id",
-  "deviceId": "stable-device-id",
-  "localGeneration": 42,
-  "acknowledgedGeneration": 39,
-  "baseServerRevision": 17,
-  "baseSnapshot": {},
-  "pendingSnapshotHash": "sha256:...",
-  "lastSyncAt": 1787742000000,
-  "status": "pending"
+  "schemaVersion": 2,
+  "accountId": "user-id",
+  "state": {},
+  "sync": {
+    "protocol": 1,
+    "revision": 17,
+    "base": {},
+    "localGeneration": 42,
+    "acknowledgedGeneration": 39,
+    "pending": true,
+    "mutationId": "stable-retry-id",
+    "lastAttempt": null,
+    "lastSyncAt": 1787742000000,
+    "status": "pending",
+    "lastError": null,
+    "conflict": null
+  }
 }
 ```
 
-Il nuovo storage deve essere namespaced per `userId`, con uno spazio guest separato. La base
-snapshot può vivere in IndexedDB per non duplicare l'intero profilo nella quota ridotta di
-`localStorage`. L'adozione completa di IndexedDB come storage transazionale è preferibile se i
-test dimostrano che il cambio di hydration non regredisce l'avvio; in alternativa la prima fase
-può usare un envelope locale atomico e versionato, mantenendo `gym_state_v1` come sorgente di
-migrazione. In entrambi i casi:
+Il `deviceId` è salvato separatamente in `gym_sync_device_id`; `lastAttempt`, quando presente,
+contiene mutation ID, generazione, revisione di base e snapshot esatto della richiesta. Il guest
+può avere un `guestEpoch` tecnico per impedire che schede obsolete ricreino dati già trasferiti.
+
+Il nuovo storage è namespaced per `accountId`, con uno spazio guest separato. La release usa un
+envelope locale atomico e versionato, mantenendo `gym_state_v1` soltanto come sorgente di
+migrazione. Un futuro passaggio a IndexedDB resta possibile se la dimensione del profilo dovesse
+avvicinarsi alla quota del browser. Nell'implementazione corrente:
 
 - il dirty/pending deve essere durevole prima che la UI confermi il salvataggio;
 - le mutazioni devono essere serializzate;
@@ -1796,7 +1815,7 @@ migrazione. In entrambi i casi:
 - `active` resta device-local e una modifica soltanto ad `active` non incrementa la revisione
   server; il workout concluso entra invece nello stato sincronizzabile una sola volta.
 
-Contratto server proposto:
+Contratto server implementato:
 
 ```json
 GET /api/data
@@ -1955,14 +1974,13 @@ Scenari manuali minimi replicabili:
 5. perdere la risposta dopo l'applicazione server e ritentare: revisione e workout non raddoppiano;
 6. scadere la sessione o tentare logout offline: la copia pending resta recuperabile.
 
-File probabili: `frontend/src/store/useStore.js`, `frontend/src/lib/api.js`, nuovi moduli
-`sync-state.js`, `sync-merge.js` e `sync-storage.js`, `frontend/src/App.jsx`, nuovo componente
-`SyncStatus.jsx`, `frontend/src/views/Settings.jsx`, `frontend/src/main.jsx`, sorgente/build del
-service worker, `api/server.js` o un nuovo modulo sync, reader amministrativi, locale, test e
-script browser/Docker dedicati.
+File consegnati principali: `frontend/src/store/useStore.js`, `frontend/src/lib/api.js`,
+`sync-state.js`, `sync-merge.js`, `sync-runtime.js`, `frontend/src/App.jsx`, `SyncStatus.jsx`,
+`frontend/src/views/Settings.jsx`, `frontend/src/main.jsx`, generatore e runtime del service
+worker, `api/server.js`, `api/state-store.js`, reader amministrativi, locale e test dedicati.
 
-Il requisito va consegnato come release autonoma e reversibile. L'inserimento e questa analisi
-**non autorizzano alcuna modifica al codice applicativo**.
+Il requisito è stato consegnato come release autonoma e reversibile nel commit `6279f0a`; gli
+hardening emersi dalla revisione finale restano separati fino al prossimo commit autorizzato.
 
 ### 5.16 Ultime quattro sessioni dell'esercizio durante il workout
 
@@ -2398,7 +2416,7 @@ Il requisito 15 separa nettamente tre livelli:
 3. metadati tecnici locali di sync (`deviceId`, revisioni, base snapshot, generazioni e pending),
    esclusi da backup e payload di dominio.
 
-Sul server il file legacy raw resta leggibile come revisione zero; il futuro envelope revisionato
+Sul server il file legacy raw resta leggibile come revisione zero; l'envelope revisionato
 è una responsabilità di persistenza, non un nuovo campo del profilo utente.
 
 Token OAuth/PAT, refresh token e segreti provider non appartengono a questo stato sincronizzato:
@@ -2430,7 +2448,7 @@ Definizioni:
 |---:|---:|---|---|---|---|---|
 | 1 | 6 | **Completato** | P0 | Identità delle istanze tra routine | Evita contaminazioni di peso, target, streak e recupero fra configurazioni differenti | — |
 | 2 | 11 | **Completato** | P0 | Validare il livello realmente completato (`RF-11.1`) | Corregge direttamente le prescrizioni, compreso lo storico 8/9 eseguito a 10 | 6 |
-| 3 | 15 | **Non completato** | P0 proposta | Offline-first e sync senza perdita silenziosa | Il protocollo whole-state corrente può sovrascrivere dati fra device; serve una fondazione revisionata | identità stabili, storage locale |
+| 3 | 15 | **Completato** | P0 | Offline-first e sync senza perdita silenziosa | CAS, idempotenza, merge e conflitti impediscono overwrite ciechi fra device | identità stabili, storage locale |
 | 4 | 1 | **Completato** | P1 | Corpo libero puro senza campi peso | Rimuove un'ambiguità frequente e impedisce carichi invisibili recuperati dallo storico | 6, distinzione puro/zavorrato |
 | 5 | 5 | **Completato** | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
 | 6 | 12 | **Completato** | P1 | Mostrare e qualificare data/ora di inizio e fine | Lifecycle deterministico, storico leggibile e base temporale per linking esterno | — |
@@ -2453,9 +2471,8 @@ Gli ID `2A`, `2B` e `2C` non introducono un nuovo requisito: dividono il punto 2
 locale, sincronizzazione server e companion smartwatch. Questa separazione evita di legare la
 correttezza del timer alla disponibilità di un determinato modello di orologio.
 
-Se viene validata la nuova priorità P0, il **prossimo requisito non completato** diventa **15 —
-offline-first e sync senza perdita silenziosa**. In assenza di questa validazione, il prossimo
-requisito già approvato resta **2A — timer locale persistente e deterministico**. Fra le due nuove
+Con il requisito 15 completato, il **prossimo requisito non completato e già approvato** è
+**2A — timer locale persistente e deterministico**. Fra le due nuove
 attività, la 16 è la prima implementabile: è read-only e può poi rendere trasparenti le evidenze
 della 17. L'estensione 7A è già committata in `ca68f78`; i requisiti 8 e 9 restano fuori scope.
 
@@ -2504,12 +2521,12 @@ Questi requisiti possono essere consegnati in commit separati e verificati uno p
 
 #### Release B.1 — Continuità offline e sync resiliente
 
-**Stato: Non iniziata; analisi pronta e sviluppo non autorizzato.**
+**Stato: Completata e verificata automaticamente; collaudo CasaOS/dispositivi reali residuo.**
 
-1. `15A`: app shell precacheata, cold start offline e policy media/secure context.
-2. `15A`: storage locale durevole, per account, e stato sync visibile.
-3. `15B`: protocollo server revisionato, CAS, idempotenza e richieste serializzate.
-4. `15C`: merge a tre vie, conflitti espliciti, logout/reauth sicuri e retry con backoff.
+1. `15A`: app shell precacheata, cold start offline e policy media/secure context — completato.
+2. `15A`: storage locale durevole, per account, e stato sync visibile — completato.
+3. `15B`: protocollo server revisionato, CAS, idempotenza e richieste serializzate — completato.
+4. `15C`: merge a tre vie, conflitti espliciti, logout/reauth sicuri e retry con backoff — completato.
 5. Gate con due client, due tab, server/API down-up, risposta persa, upgrade PWA e Docker/CasaOS.
 
 Le fasi sono necessarie per rendere verificabile l'epic, ma la consegna finale deve restare un
@@ -2562,7 +2579,6 @@ OS. Supportarle entrambe nella prima release raddoppierebbe test, distribuzione 
 L'inserimento nel backlog non autorizza lo sviluppo:
 
 - requisito 13: validare priorità e tabella `specific_warmup_v1`;
-- requisito 15: validare la priorità P0 e lo scope HTTPS/PWA, CAS e conflitti;
 - requisito 16: la specifica è pronta, ma questo turno autorizza soltanto documentazione;
 - requisito 17: validare soglie prudenziali, review tecnica e riduzione proposta.
 
@@ -2619,7 +2635,7 @@ scope insieme ai requisiti 8 e 9.
 
 ### Fase 2.1 — offline-first e sync resiliente
 
-**Stato: Non iniziata; analisi pronta e sviluppo non autorizzato.**
+**Stato: Completata e verificata automaticamente; collaudo CasaOS/dispositivi reali residuo.**
 
 1. Precache atomica della shell e definizione dell'offline readiness.
 2. Storage per account, pending durevole e state machine UX.
@@ -2678,6 +2694,10 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 
 ## 9. Commit piccoli suggeriti
 
+La numerazione seguente conserva le unità logiche definite durante l'analisi e non rappresenta
+l'ordine operativo corrente. Per la sequenza dei prossimi sviluppi fa fede la tabella della
+sezione 7: `2A`, poi 16, 17, 4 e 10.
+
 1. `test: characterize routine exercise history scopes`
 2. `feat: add stable routine exercise identities`
 3. `feat: isolate progression groups and recovery controls`
@@ -2695,7 +2715,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 15. `feat: add equipment profiles and immutable loading guidance` — Release C, requisito 7 in un commit unico
 16. `feat: distinguish selectorized and plate-loaded cable equipment` — estensione 7A
 17. `feat: add evidence-informed warm-up loading guide` — Release C.1, requisito 13
-18. `feat: add offline-first conflict-safe profile sync` — requisito 15, squash finale della release
+18. `feat: add offline-first conflict-safe profile sync` — requisito 15, consegnato in `6279f0a`
 19. `docs: describe internal api and add openapi contract`
 20. `feat: add scoped personal access tokens and read api`
 21. `feat: sync revisioned rest timers and pair trusted devices`
@@ -2713,7 +2733,7 @@ Questa è una lista di unità di consegna, non un'autorizzazione a creare commit
 | Snapshot/lifecycle | `frontend/src/lib/workout-prescription.js`, `frontend/src/sheets.jsx` |
 | Workout/timer | `frontend/src/views/Workout.jsx`, `frontend/src/store/useUI.js` |
 | Stato/sync corrente | `frontend/src/store/useStore.js`, `frontend/src/lib/api.js`, `api/server.js` |
-| Offline/sync 15 | `useStore.js`, `api.js`, `App.jsx`, `main.jsx`, service worker/build, nuovi `sync-state.js`, `sync-merge.js`, `sync-storage.js`, `SyncStatus.jsx`, `api/server.js`, reader admin e test Docker/browser |
+| Offline/sync 15 | `useStore.js`, `api.js`, `App.jsx`, `main.jsx`, service worker/build, `sync-state.js`, `sync-merge.js`, `sync-runtime.js`, `SyncStatus.jsx`, `api/server.js`, `api/state-store.js`, reader admin e test protocollo/browser |
 | Routine | `frontend/src/views/Plan.jsx`, `frontend/src/views/RoutineEdit.jsx` |
 | Corpo libero/config | `frontend/src/sheets.jsx`, `frontend/src/lib/history.js` |
 | Avvio/peso corporeo | `frontend/src/views/Settings.jsx`, `frontend/src/sheets.jsx`, `frontend/src/store/useStore.js`, `frontend/src/views/Home.jsx` |
@@ -2804,11 +2824,11 @@ Polar non richiede una decisione tecnica sulla direzione: la scrittura openGym �
 offerta dall'API pubblica corrente. L'unica integrazione raccomandabile è Polar → openGym come
 arricchimento.
 
-### Decisioni proposte il 2026-09-26, ancora da validare prima dello sviluppo
+### Decisioni di prodotto registrate il 2026-09-26
 
-1. Requisito 15: priorità P0; replica locale per account, revisione server CAS, idempotenza, merge
-   a tre vie e conflitti espliciti. La PWA garantisce cold start offline soltanto dopo installazione
-   riuscita in secure context.
+1. Requisito 15, **applicato**: priorità P0; replica locale per account, revisione server CAS,
+   idempotenza, merge a tre vie e conflitti espliciti. La PWA garantisce cold start offline
+   soltanto dopo installazione riuscita in secure context.
 2. Requisito 16: pulsante compatto nell'esercizio e bottom sheet verticale con al massimo quattro
    workout dello stesso `progressionId`; vista di sola lettura e nessun nuovo dato persistente.
 3. Requisito 17: assistente manuale, non deload automatico; possibile stallo dopo tre esposizioni
@@ -2885,23 +2905,21 @@ locali dell'esperienza quotidiana e epic infrastrutturali separate.
 Sono già completati e verificati: isolamento delle istanze (6), progressione dopo modifiche
 manuali (11), corpo libero puro/zavorrato (1), default recupero automatico (5), timestamp (12),
 attrezzatura con snapshot (7), distinzione dei cavi e guida per punto (7A) e richiesta del peso
-corporeo configurabile (14).
+corporeo configurabile (14), oltre alla continuità offline con sincronizzazione sicura (15).
 
 La sequenza residua più sicura proposta è:
 
-1. validare la priorità P0 del requisito 15 e, se approvata, eliminare prima il rischio di perdita
-   dati con offline-first e sync revisionato; diversamente resta primo il timer locale 2A;
-2. completare 2A, rendendo il timer locale persistente e deterministico;
-3. realizzare la vista read-only delle ultime quattro sessioni (16), la più piccola e sicura fra
+1. completare 2A, rendendo il timer locale persistente e deterministico;
+2. realizzare la vista read-only delle ultime quattro sessioni (16), la più piccola e sicura fra
    le due nuove attività;
-4. validare e poi implementare l'assistente allo stallo (17), riusando la vista 16 per rendere
+3. validare e poi implementare l'assistente allo stallo (17), riusando la vista 16 per rendere
    verificabile ogni evidenza e senza decremento automatico;
-5. realizzare rail routine (4) e alias/ricerca centralizzata (10);
-6. avviare il riscaldamento specifico (13) solo dopo l'autorizzazione esplicita;
-7. creare documentazione/contratto API (3), quindi timer multi-device (2B) e companion (2C);
-8. valutare Withings (8) e Polar (9) solo quando rientreranno nello scope.
+4. realizzare rail routine (4) e alias/ricerca centralizzata (10);
+5. avviare il riscaldamento specifico (13) solo dopo l'autorizzazione esplicita;
+6. creare documentazione/contratto API (3), quindi timer multi-device (2B) e companion (2C);
+7. valutare Withings (8) e Polar (9) solo quando rientreranno nello scope.
 
 Questa sequenza mantiene spiegabile ogni prescrizione, conserva i workout passati e impedisce
 che integrazioni o cambi di palestra modifichino retroattivamente ciò che è già stato registrato.
-Le aggiunte 15, 16 e 17 sono state analizzate e censite soltanto nel backlog: non è stato avviato
+Le aggiunte 16 e 17 sono state analizzate e censite soltanto nel backlog: non è stato avviato
 alcuno sviluppo applicativo.

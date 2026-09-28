@@ -18,3 +18,23 @@ describe('Confirmed Rep-Range first-confirmation copy', () => {
     expect(italian[UNLOADED_CONFIRMATION]).toContain('completare il passo di progressione')
   })
 })
+
+describe('Confirmed recovery-first copy', () => {
+  const loaded = 'Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same load and recovery to increase weight.'
+  const unloaded = 'Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same recovery to complete the progression step.'
+  const paused = 'Maximum reached, but progression is paused until recovery returns to its base of {0}s. No maximum confirmations are counted above base.'
+  const fresh = 'Recovery is at its base of {0}s. Complete two new maximum-rep sessions at this recovery to progress; earlier confirmations do not count.'
+
+  it.each([loaded, unloaded, paused, fresh])('provides Italian copy and an explicit English fallback: %s', key => {
+    expect(confirmedRepRangeFallback[key]).toBe(key)
+    expect(italian[key]).toBeTruthy()
+    expect(italian[key]).not.toBe(key)
+  })
+  it('explains the base condition and distinguishes a held maximum from a counted confirmation', () => {
+    expect(italian[paused]).toContain('progressione è sospesa')
+    expect(italian[paused]).toContain('non si accumulano')
+    expect(italian[fresh]).toContain('due nuove sessioni')
+    expect(italian[loaded]).toContain('stesso peso e recupero')
+    expect(italian[unloaded]).not.toContain('aumentare il carico')
+  })
+})

@@ -86,8 +86,19 @@ describe('three-way sync merge', () => {
 
     expect(merged.clean).toBe(true)
     expect(merged.state.workouts.map(item => item.id)).toEqual([
-      'local-new', 'remote-new', 'old'
+      'old', 'local-new', 'remote-new'
     ])
+  })
+
+  it('orders concurrent workouts chronologically instead of by random id', () => {
+    const base = { workouts: [{ id: 'base', d: '2026-09-20', start: 100 }] }
+    const local = { workouts: [...base.workouts, { id: 'zzz', d: '2026-09-21', start: 200 }] }
+    const remote = { workouts: [...base.workouts, { id: 'aaa', d: '2026-09-22', start: 300 }] }
+
+    const merged = threeWayMerge({ base, local, remote })
+
+    expect(merged.clean).toBe(true)
+    expect(merged.state.workouts.map(workout => workout.id)).toEqual(['base', 'zzz', 'aaa'])
   })
 
   it('merges separate changes inside the same identified entity', () => {
@@ -115,7 +126,7 @@ describe('three-way sync merge', () => {
 
     expect(merged.clean).toBe(true)
     expect(merged.state.bodyweight.map(entry => entry.d)).toEqual([
-      '2026-01-02', '2026-01-03', '2026-01-01'
+      '2026-01-01', '2026-01-02', '2026-01-03'
     ])
   })
 

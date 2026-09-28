@@ -53,14 +53,19 @@ export default function Settings() {
     try { const u = await passkeyLogin(); setUser(u); await pullState(); toast(t('Welcome back, {0}', u.name)) }
     catch (e) { if (e.name !== 'NotAllowedError' && e.name !== 'AbortError') toast(e.message || t('Sign-in failed')) }
   }
+  const signOutFailure = e => e?.code === 'SIGN_OUT_REAUTH_REQUIRED'
+    ? t('Sign in again to sync')
+    : e?.code === 'ACTIVE_WORKOUT'
+    ? t('Finish your current workout first')
+    : e?.code === 'SYNC_PENDING'
+      ? t('Could not sign out — sync or export the pending changes first.')
+      : t('Could not sign out — you are still signed in.')
   const signOutHere = async () => {
     try {
       await signOut()
       nav('/home')
     } catch (e) {
-      toast(e?.code === 'SYNC_PENDING'
-        ? t('Could not sign out — sync or export the pending changes first.')
-        : t('Could not sign out — you are still signed in.'))
+      toast(signOutFailure(e))
     }
   }
   const registerHere = () => useUI.getState().openSheet(close => <RegisterInline close={close} setUser={setUser} pushState={pushState} pullState={pullState} toast={toast} />)
@@ -73,7 +78,15 @@ export default function Settings() {
     confirmText: t('Sign out everywhere'), danger: true,
     onConfirm: async () => {
       try { await signOutAll(); nav('/home'); toast(t('Signed out on all devices')) }
-      catch (e) { toast(t('Could not sign out everywhere — you are still signed in.')) }
+      catch (e) {
+        toast(e?.code === 'SIGN_OUT_REAUTH_REQUIRED'
+          ? t('Sign in again to sync')
+          : e?.code === 'ACTIVE_WORKOUT'
+          ? t('Finish your current workout first')
+          : e?.code === 'SYNC_PENDING'
+            ? t('Could not sign out — sync or export the pending changes first.')
+            : t('Could not sign out everywhere — you are still signed in.'))
+      }
     },
   })
 

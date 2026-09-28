@@ -27,14 +27,14 @@ const control = (epochId, resetSeconds = 120) => ({
 })
 
 describe('Confirmed Rep-Range recovery epochs', () => {
-  it('keeps weight, reps and top-range streak on full history while resetting only recovery', () => {
+  it('keeps weight and reps but requires fresh top confirmations after a recovery reset', () => {
     const S = {
       unit: 'kg', restSec: 90,
       workouts: [workout({ target: 12, reps: [12, 12, 12], rest: 180 })],
       progressionControls: control('new-epoch')
     }
     expect(confirmedRepRangeProgression(S, cfg)).toMatchObject({
-      weight: 70, reps: 12, topRangeStreak: 1,
+      weight: 70, reps: 12, topRangeStreak: 0,
       restSeconds: 120, restEpochId: 'new-epoch', restSource: 'manual_reset'
     })
   })

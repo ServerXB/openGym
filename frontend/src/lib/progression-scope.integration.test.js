@@ -31,7 +31,8 @@ const completed = (cfg, targetReps, reps, d) => ({
     prog: 'confirmed_rep_range',
     targetReps,
     reps: targetReps,
-    restSeconds: 120
+    restSeconds: 120,
+    restBaseSeconds: 120
   },
   sets: reps.map(r => ({ w: cfg.weight, r, done: true }))
 })
@@ -145,7 +146,7 @@ describe('progression scopes across the workout lifecycle', () => {
       weight: 70,
       reps: 10,
       topRangeStreak: 1,
-      why: ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
+      why: ['Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same load and recovery to increase weight.']
     })
 
     S.workouts.push(

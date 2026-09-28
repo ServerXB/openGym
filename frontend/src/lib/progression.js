@@ -56,7 +56,7 @@ export const POLICY_DESC = {
   linear: 'Hit every rep in every set and the weight goes up. Repeated misses trigger a deload.',
   greyskull: 'Two straight sets plus a final set taken to failure. Beat the target on that set and the weight goes up — double if you double the reps. One failure resets 10 %.',
   double: 'Work up through a rep range at the same weight. Reach the top of the range in every set and the weight goes up, reps back to the bottom.',
-  confirmed_rep_range: 'Add one rep after a clean session. At the top, confirm twice before adding weight; later-set misses add recovery time.',
+  confirmed_rep_range: 'Add one rep after a clean session. Return to base recovery before confirming the maximum twice to progress; later-set misses add recovery time.',
   time: 'Hold every set for the full duration and the target goes up.'
 }
 
@@ -229,6 +229,11 @@ const snapshotLoad = value => {
 }
 
 const snapshotId = value => typeof value === 'string' && value.trim() ? value.trim() : null
+const snapshotSeconds = value => {
+  if (value == null || value === '' || typeof value === 'boolean') return null
+  const n = Number(value)
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null
+}
 
 // A historical range is usable only when the historical snapshot actually contains it. Never
 // fill a missing bound from today's routine: doing so would turn an old 8-rep result into a new
@@ -334,15 +339,15 @@ export function confirmedRepRangeSession(entry, fallback) {
     topRangeSuccess: outcome === 'top_range_success',
     outcome,
     ok,
+    // Confirmation eligibility must use the historical prescription, never today's fallback.
+    prescribedRestSeconds: snapshotSeconds(target.restSeconds),
     restSeconds: Math.max(0, target.restSeconds ?? fallback?.restSeconds ?? 0),
     maxRestSeconds: Math.max(0, target.maxRestSeconds ?? fallback?.maxRestSeconds ?? 0),
     restEpochId: typeof target.restEpochId === 'string' ? target.restEpochId : null,
     restReductionStrategy: target.restReductionStrategy,
     // Never infer this from today's config: doing so would reinterpret old successes after
     // the user edits the base. Missing means the session predates automatic reduction.
-    restBaseSeconds: Number.isFinite(Number(target.restBaseSeconds))
-      ? Math.max(0, Math.round(Number(target.restBaseSeconds)))
-      : null
+    restBaseSeconds: snapshotSeconds(target.restBaseSeconds)
   }
 }
 
@@ -408,8 +413,8 @@ function confirmedTrackedWeightIsCompatible(S, cfg) {
   return exerciseLoadMode(cfg) === LOAD_MODE.EXTERNAL
 }
 
-// Recovery has its own history boundary. A manual reset opens a new epoch without changing
-// the sessions used for weight, rep targets or the top-range confirmation streak.
+// A manual reset opens a new recovery epoch. Weight and rep history remain intact, but maximum
+// confirmations must be earned again at the base in that epoch.
 function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
   const restEpochId = control?.epochId
   const relevant = control
@@ -468,11 +473,22 @@ function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
   }
 }
 
-// Automatic recovery reduction follows consecutive successful exposures at one prescribed
-// recovery. Weight is deliberately not a boundary: narrow rep ranges can increase load before
-// four sessions at one weight, and the evidence used for the default threshold reduced rest by
-// exposure rather than by a fixed-load block.
+// Recovery reductions count successful exposures at one prescribed recovery. Progression below
+// the rep maximum continues, but load/set increases wait for two new confirmations at the base.
 function confirmedRepRangeRestPlan(recovery, sessions, normalized, last) {
+  // Raising the configured base must not leave future workouts below it, otherwise the
+  // recovery-first confirmation gate could never be reached. Existing snapshots stay frozen.
+  if (recovery.restSeconds < normalized.restSeconds) {
+    return {
+      ...recovery,
+      restSeconds: normalized.restSeconds,
+      restBaseSeconds: normalized.restSeconds,
+      restReductionStrategy: normalized.restReductionStrategy,
+      restSuccessStreak: 0,
+      restSource: 'base_floor',
+      restWhy: ['Recovery raised to its configured base of {0}s.', normalized.restSeconds]
+    }
+  }
   const strategy = normalized.restReductionStrategy
   const decision = confirmedRestAutoReduction({
     sessions,
@@ -504,6 +520,13 @@ function confirmedRepRangeRestPlan(recovery, sessions, normalized, last) {
 
   // A miss already has a more useful recovery explanation (unchanged, increased, or cap),
   // and a pending manual reset must remain visibly attributable to the user action.
+  if (strategy !== CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES && last?.topRangeSuccess
+    && decision.restSeconds > normalized.restSeconds && !recovery.restResetPending) {
+    return {
+      ...plan,
+      restWhy: ['With automatic reduction disabled, use the manual reset to return to base recovery before confirming the maximum.']
+    }
+  }
   if (strategy !== CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES || !last?.ok || recovery.restResetPending) return plan
 
   if (decision.restSeconds <= normalized.restSeconds) {
@@ -601,17 +624,20 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
     ? { sets: bodyweightSets }
     : {}
   let streak = 0
+  const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
   if (last.topRangeSuccess) {
     for (let i = progressionSessions.length - 1; i >= 0; i--) {
       const session = progressionSessions[i]
       if (!session.topRangeSuccess
         || session.progressionKey !== last.progressionKey
-        || !sameLoad(session.workingWeight, last.workingWeight)) break
+        || !sameLoad(session.workingWeight, last.workingWeight)
+        || session.prescribedRestSeconds !== initialRest
+        || session.restBaseSeconds !== initialRest
+        || (session.restEpochId ?? null) !== (recovery.restEpochId ?? null)) break
       streak++
     }
   }
   if (!last.ok) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     const why = last.outcome === 'incomplete'
       ? ['The prescription was incomplete — weight and target stay unchanged.']
       : last.outcome === 'legacy_unknown'
@@ -628,7 +654,6 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   }
 
   if (last.outcome === 'below_range_success') {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     return {
       ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: minReps,
       ...carriedSets, ...restPlan, topRangeStreak: 0,
@@ -640,7 +665,6 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   // their own target and result, but they cannot be upgraded into a top-range confirmation by
   // borrowing today's range.
   if (!last.rangeKnown) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     if (target >= maxReps) return {
       ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps,
       ...carriedSets, ...restPlan, topRangeStreak: 0,
@@ -655,7 +679,6 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   }
 
   if (!last.topRangeSuccess) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     const demonstrated = Math.max(target, last.validatedReps ?? target)
     // Advance from the highest valid level every prescribed set demonstrated. A single workout
     // may skip intermediate levels, but it still contributes at most one top confirmation.
@@ -670,17 +693,24 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
     }
   }
 
+  if (restPlan.restSeconds > initialRest || streak === 0) {
+    return {
+      ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps,
+      ...carriedSets, ...restPlan, topRangeStreak: 0,
+      why: restPlan.restSeconds > initialRest
+        ? ['Maximum reached, but progression is paused until recovery returns to its base of {0}s. No maximum confirmations are counted above base.', initialRest]
+        : ['Recovery is at its base of {0}s. Complete two new maximum-rep sessions at this recovery to progress; earlier confirmations do not count.', initialRest]
+    }
+  }
   if (streak < 2) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
     const confirmationWhy = effectiveWeight > 0
-      ? ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more at the same load to increase weight.']
-      : ['Maximum reached last workout: confirmation 1 of 2 recorded. Repeat it once more to complete the progression step.']
+      ? ['Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same load and recovery to increase weight.']
+      : ['Maximum reached at the configured base recovery: confirmation 1 of 2 recorded. Repeat it at the same recovery to complete the progression step.']
     return {
       ...rangePlan, kind: 'hold', weight: effectiveWeight, reps: maxReps,
       ...carriedSets, ...restPlan, topRangeStreak: 1, why: confirmationWhy
     }
   }
-  const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
   // With no external load there is no plate to add. Complete the same two-confirmation cycle,
   // then progress volume by one set and restart at the bottom of the range. Once the useful
   // set cap is reached, hold the target and ask for load or a harder variation instead of

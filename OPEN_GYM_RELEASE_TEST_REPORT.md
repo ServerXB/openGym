@@ -9,10 +9,11 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 
 ## 2. Ambiente di riferimento
 
-- Data ultimo aggiornamento: 2026-09-23
+- Data ultimo aggiornamento: 2026-09-28
 - Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
+- Revisione verificata: `6279f0a`, più hardening finale non ancora committato
 - Sistema usato per i test: Windows PowerShell
 - Frontend: React 19, Vite 8, Vitest 4
 - Stato baseline frontend: 18 file di test, 344 test superati
@@ -25,9 +26,12 @@ Dalla root del repository:
 ```powershell
 cd frontend
 npm.cmd ci
-npm.cmd test -- --run
+npm.cmd test
 npm.cmd run build
 node scripts/check-locales.mjs
+node scripts/check-equipment-solver.mjs
+cd ..\api
+npm.cmd test
 ```
 
 Per controllare anche errori di whitespace nel diff:
@@ -2367,3 +2371,289 @@ Restano separati dai gate automatici, perché richiedono l'ambiente reale dell'u
 - verifica dei valori contro la specifica fisica della macchina, senza assumere rapporti di
   pulegge non dichiarati;
 - prova con l'inventario reale dei dischi, se in futuro verrà censito.
+
+---
+
+## 15. Release B.1 — Requisito 15: offline-first e sincronizzazione sicura
+
+Data verifica: **2026-09-28**
+
+Stato: **implementazione conclusa e tutti i gate automatici superati**. Il nucleo del requisito è
+nel commit `6279f0a` (`add feature offline`), già presente anche sul branch remoto. Gli hardening
+descritti al punto 15.5 sono nel worktree e, al momento di questo report, non sono ancora stati
+committati per rispettare il gate di approvazione prima di ogni nuovo commit.
+
+### 15.1 Comportamento consegnato
+
+Per un profilo che ha effettuato almeno un accesso online sul dispositivo:
+
+- la copia locale per account è la replica di lavoro e viene salvata prima di mostrare la modifica
+  come acquisita;
+- routine, impostazioni, peso corporeo e workout completati possono essere modificati mentre API o
+  CasaOS non sono raggiungibili;
+- un workout attivo resta locale al dispositivo, sopravvive al refresh e non viene inviato al
+  server finché non è concluso;
+- lo stato compatto distingue sincronizzato, in corso, pending, offline locale, autenticazione
+  richiesta, errore storage e conflitto;
+- il retry usa backoff con jitter e viene richiamato anche da boot, ritorno online, focus,
+  `visibilitychange`, nuova autenticazione e comando manuale;
+- ogni scrittura server usa revisione monotona e compare-and-swap: una revisione obsoleta non può
+  sovrascrivere silenziosamente dati più recenti;
+- `clientId` e `mutationId` rendono idempotente il retry dopo timeout, crash o risposta persa;
+- le modifiche concorrenti non sovrapposte vengono unite con merge a tre vie; quelle incompatibili
+  restano visibili e richiedono la scelta esplicita fra copia locale e copia server;
+- logout e sessione scaduta non cancellano modifiche pending: sono disponibili retry ed export;
+- ogni account usa un envelope locale separato e una risposta tardiva del vecchio account viene
+  ignorata dopo il cambio profilo;
+- la build di produzione precachea atomicamente l'app shell e non mette mai in cache richieste o
+  risposte `/api`.
+
+Il cold start con l'intero frontend spento è garantibile solo dopo un caricamento riuscito della
+build corrente in un secure context, quindi HTTPS oppure `localhost`. Su
+`http://<IP-LAN>:<porta>` il browser mobile normalmente non installa il service worker. Immagini e
+animazioni sono cache-on-demand: un media mai aperto può mancare offline, ma non blocca il workout.
+
+### 15.2 Persistenza, protocollo e backward compatibility
+
+Il client salva un envelope versionato in `localStorage`, namespaced per account. Lo stato di
+dominio, la base confermata, revisione, generazioni, ultimo tentativo e conflitto restano separati
+concettualmente; `deviceId` è stabile per l'installazione. `active` e `_ts` non entrano nel payload
+sincronizzato; revisione, device ID, base, coda e ricevute tecniche non entrano nel backup utente.
+
+Il server espone:
+
+```text
+GET /api/data
+→ { syncProtocol, revision, state } + ETag
+
+PUT /api/data
+← { syncProtocol, baseRevision, clientId, mutationId, state }
+→ ack oppure 412 con lo snapshot corrente
+```
+
+Ogni file utente usa un envelope con revisione e ricevute idempotenti, scritto atomicamente. Sono
+stati verificati anche questi casi di compatibilità:
+
+1. un file server JSON legacy viene letto come revisione zero e non viene riscritto alla sola
+   lettura;
+2. la prima scrittura valida lo migra senza modificare i workout contenuti;
+3. il vecchio `gym_state_v1` è usato una sola volta come sorgente di migrazione locale e viene
+   assegnato a un solo account;
+4. i reader amministrativi e reminder accettano sia stato raw sia envelope revisionato;
+5. un envelope locale corrotto produce errore storage e non viene sostituito con default vuoti;
+6. un payload oltre 5 MiB riceve `413` senza ack e senza sostituire lo stato precedente;
+7. il backend JSON supporta un solo processo API sul volume: più repliche richiedono database o
+   lock distribuito e restano fuori scope.
+
+### 15.3 Matrice dei test automatici mirati
+
+Il gate frontend dedicato comprende **9 file e 90 test**, tutti superati (inclusi nei 725 complessivi):
+
+| Area | Scenari verificati |
+|---|---|
+| Stato locale | canonicalizzazione, chiavi per account, device ID stabile, migrazione legacy, quota/corruzione fail-closed, generazioni e ack |
+| Merge | campi indipendenti, conflitto stesso campo, delete-vs-edit, riordino, slot per `routineExerciseId`, workout e peso corporeo ordinati cronologicamente |
+| Store (34 test) | modifica offline e reload, GET/PUT CAS, `412` + retry, conflitto e risoluzione, mutazione durante PUT, risposta persa, ricevuta idempotente storica, errori tardivi dopo cambio account, eventi storage in ritardo, dominio e workout attivo fra schede, trasferimento guest/epoch, logout concorrente, account isolation, `401` |
+| API client | corpo errore disponibile al merge e timeout esplicito |
+| UX sync | stato pending, retry, conflitto compatto durante workout e nessun controllo sync per guest |
+| Service worker | registrazione solo in contesto sicuro, manifest deterministico, fingerprint contenuti, installazione atomica, fallback navigazione e API escluse dalla cache |
+| Retry | backoff limitato a un minuto e classificazione distinta di rete, auth, conflitto ed errori permanenti |
+
+Il gate backend comprende **2 suite e 20 test**, tutti superati:
+
+- revisione zero e lettura legacy;
+- revisioni monotone e pulizia dei campi locali;
+- compare-and-swap e un solo vincitore per due scritture concorrenti;
+- replay idempotente anche dopo una revisione successiva;
+- rifiuto del riuso di un `mutationId` per contenuto differente;
+- persistenza di revisione/ricevute dopo restart e limite delle ricevute;
+- scrittura atomica fallita senza falso ack e file corrotto fail-closed;
+- autenticazione obbligatoria e isolamento fra utenti;
+- richieste malformate e payload troppo grande senza perdita dello stato valido.
+
+### 15.4 Esito della regressione completa
+
+Risultato finale del 2026-09-28:
+
+```text
+Frontend completo          46 file, 725 test superati, 0 falliti
+Frontend mirato sync/PWA    9 file,  90 test superati, 0 falliti
+Backend                     2 suite, 20 test superati, 0 falliti
+Build Vite                superata, 128 moduli trasformati
+Locali                    11 lingue, 898 chiavi ciascuna, sincronizzate
+Solver attrezzatura       2.000 confronti deterministici, 0 divergenze
+Smoke Edge a 320 px          29 controlli superati, 0 falliti
+git diff --check           superato, nessun errore di whitespace
+```
+
+La build ha generato `dist/sw.js` con fingerprint di contenuto, manifest completo della shell,
+fallback di navigazione e regola esplicita di esclusione `/api`. Resta il warning Vite già noto
+per un chunk oltre 1.500 kB: è non bloccante e non è stato introdotto dalla logica di sync.
+
+### 15.5 Hardening emerso dalla review finale
+
+La revisione successiva al commit principale ha individuato e coperto questi edge case:
+
+1. una ricevuta idempotente può riferirsi a una revisione storica se un altro device ha già
+   avanzato il server; il client ora legge la head corrente prima di dichiararsi convergente e,
+   se anche quella lettura perde la connessione, conserva il tentativo pending con lo stesso ID.
+   Lo snapshot confermato diventa la base causale: un'ulteriore modifica locale non viene trattata
+   come conflitto con il proprio precedente invio riuscito;
+2. una risposta o un errore di rete dell'account A può arrivare dopo il passaggio all'account B;
+   ogni fase del sync verifica ora l'account atteso prima di applicare risposta, errore o ack;
+3. l'unione di workout concorrenti non può dipendere dall'ordinamento casuale degli ID perché
+   alcuni algoritmi leggono l'ultimo elemento come più recente; workout e pesate convergono in
+   ordine cronologico deterministico;
+4. il test API ora dimostra nello stesso processo che una richiesta anonima riceve `401` e che lo
+   stato scritto da un secondo utente non è leggibile dal primo;
+5. lo smoke browser del requisito attrezzatura usava ancora `gym_state_v1` come storage corrente:
+   il runner è stato aggiornato all'envelope guest `gym_profile_v2:guest` e ha poi superato tutti
+   i 29 controlli a 320 px con Edge headless, API e media server non disponibili;
+6. una scheda obsoleta poteva sovrascrivere le preferenze o il workout attivo salvati da un'altra
+   prima della consegna dell'evento `storage`. Ogni scrittura rilegge ora la copia persistita e
+   riconcilia dominio, metadati e `active`; test dedicati coprono anche ack in volo, modifiche
+   indipendenti, conflitti sullo stesso campo e basi server di revisioni diverse;
+7. logout e logout globale bloccano workout attivi o modifiche pending, anche se provenienti da
+   un'altra scheda. Se i dati cambiano durante la richiesta di uscita, la copia viene conservata
+   e la UI richiede un nuovo accesso; una risposta tardiva non disconnette il nuovo account;
+8. il trasferimento guest rilegge la copia persistita prima di copiarla nell'account, così include
+   workout/active salvati da altre schede. Dopo il trasferimento viene salvato un guest vuoto con
+   nuovo `guestEpoch`: le schede obsolete non possono ricreare i dati né trasferirli in un secondo
+   account. Uno storage guest corrotto blocca il trasferimento senza alterare i byte originali.
+
+Il punto 8 è stato riprodotto durante la review indipendente (workout perso al login da una
+scheda guest obsoleta), corretto e ricontrollato: **5 test guest superati**, inclusi i tre nuovi
+scenari. La suite store completa comprende 34 test. Nessuna regressione rilevata nei gate eseguiti.
+
+Nel controllo browser finale si è verificato un primo timeout: React non veniva caricato a causa
+di risposte Vite `504 Outdated Optimize Dep`. Il riavvio del solo server di sviluppo con `--force`
+ha rigenerato la cache delle dipendenze; il successivo smoke ha superato tutti i 29 controlli.
+Non è stato modificato codice applicativo per aggirare il timeout.
+
+Questi casi hanno test di regressione dedicati e sono inclusi nei conteggi del punto 15.4.
+
+### 15.6 Comandi esatti per replicare i gate
+
+Dalla root del repository, con dipendenze già installate:
+
+```powershell
+cd frontend
+
+# Solo requisito 15
+npm.cmd test -- `
+  src/lib/sync-state.test.js `
+  src/lib/sync-merge.test.js `
+  src/lib/sync-runtime.test.js `
+  src/store/useStore.sync.test.js `
+  src/components/SyncStatus.test.jsx `
+  src/lib/api.test.js `
+  src/lib/service-worker.test.js `
+  scripts/build-service-worker.test.js `
+  scripts/service-worker-runtime.test.js
+
+# No-regression frontend e build deployabile
+npm.cmd test
+npm.cmd run build
+node scripts/check-locales.mjs
+node scripts/check-equipment-solver.mjs
+
+# Protocollo e persistenza backend
+cd ..\api
+npm.cmd test
+
+# Whitespace e patch residue
+cd ..
+git diff --check
+```
+
+Lo smoke browser esistente si replica avviando Vite su `127.0.0.1:4173`, un Edge/Chromium headless
+con remote debugging sulla porta `9222`, quindi:
+
+```powershell
+cd frontend
+node scripts/check-equipment-browser.mjs
+```
+
+Lo script usa un profilo browser temporaneo, verifica 29 condizioni e chiude il browser. I comandi
+completi di avvio Edge sono riportati anche al punto 14.6.
+
+Se Vite risponde `504 Outdated Optimize Dep`, arrestare il precedente processo di sviluppo e
+riavviarlo con `npm.cmd run dev -- --host 127.0.0.1 --port 4173 --force`, poi ripetere lo smoke.
+Il test browser copre la regressione UI dell'attrezzatura; non sostituisce il cold start PWA
+production su telefono né il collaudo end-to-end di due dispositivi reali.
+
+Se `node_modules` non è presente, eseguire prima `npm.cmd ci` sia in `frontend` sia in `api`.
+
+### 15.7 Collaudo manuale raccomandato su CasaOS
+
+Prima del collaudo creare un backup dell'intera cartella/volume `data`, non soltanto del JSON
+logico, perché revisione e ricevute idempotenti fanno parte della persistenza server.
+
+1. **Solo API offline:** aprire la PWA online, fermare l'API, completare un workout e ricaricare.
+   Deve restare visibile localmente come pending; al riavvio API deve sincronizzarsi una volta sola.
+2. **Intero stack offline:** dopo un caricamento via HTTPS, fermare frontend e API, chiudere e
+   riaprire la PWA. La shell e i dati devono aprirsi; dopo il riavvio stack lo stato deve convergere.
+3. **Due device, cambi indipendenti:** su A aggiungere un workout offline e su B modificare una
+   preferenza. Alla riconnessione devono comparire entrambi senza richiesta di scelta.
+4. **Conflitto reale:** modificare offline lo stesso campo della stessa routine su A e B. Deve
+   comparire il conflitto; esportare entrambe le copie e scegliere consapevolmente quale mantenere.
+5. **Risposta persa:** interrompere la connessione subito dopo un PUT e ritentare. Lo stesso
+   `mutationId` deve ricevere ack idempotente e non duplicare workout o pesata.
+6. **Auth scaduta:** lasciare una modifica pending, invalidare la sessione e riaprire. Deve apparire
+   `Accesso richiesto`; dopo login dello stesso profilo la modifica deve restare recuperabile.
+7. **Logout pending:** con API offline tentare il logout. Deve essere bloccato e deve suggerire di
+   sincronizzare o esportare una copia; nella release corrente l'export non forza il logout e la
+   sessione può terminare soltanto dopo la sincronizzazione.
+8. **Account A/B:** memorizzare dati diversi per due profili nello stesso browser e alternarli.
+   Nessun dato o risposta tardiva di A deve apparire in B.
+9. **Aggiornamento PWA interrotto:** interrompere il download della nuova shell. Il service worker
+   precedente deve restare attivo; la nuova cache diventa corrente solo dopo precache completa.
+10. **Media mai aperto:** offline, aprire un esercizio con immagine non ancora scaricata. Può
+    apparire il placeholder, ma serie, timer e chiusura workout devono funzionare.
+11. **Due schede dello stesso account:** avviare un workout su A e cambiare una preferenza su B;
+    entrambe devono conservare workout e preferenza. Ripetere con modifiche indipendenti e con
+    due valori diversi dello stesso campo: solo il secondo caso richiede risoluzione conflitto.
+12. **Logout durante una modifica:** con risposta logout rallentata, salvare un cambiamento o
+    avviare un workout prima della risposta. La copia locale deve restare disponibile e deve
+    comparire la richiesta di nuovo accesso, non una cancellazione del profilo.
+13. **Guest su due schede:** salvare un workout su A e accedere da B. L'account deve ricevere il
+    workout più recente; una scheda guest rimasta aperta non deve ricopiarlo in un altro account.
+
+Per verificare la persistenza CasaOS/Docker ripetere i punti 1–3 dopo `docker compose down` e
+`docker compose up -d`, senza cancellare il volume `data` né i dati sito del browser.
+
+### 15.8 Gate manuali residui e decisione di rilascio
+
+In questo ambiente non è disponibile il comando Docker e non sono collegati il CasaOS reale, due
+dispositivi fisici o uno screen reader. Restano quindi da eseguire sul target:
+
+- down/up reale del container con volume persistente;
+- cold start PWA via HTTPS su telefono;
+- concorrenza fra due browser/dispositivi reali;
+- prova touch a 320 px e lettura completa dello stato/conflitto con screen reader;
+- verifica di quota con una copia realistica del profilo più grande dell'utente.
+
+La decisione tecnica è: **idoneo al rilascio di collaudo**, perché tutti i gate automatici e la
+regressione completa sono verdi. Il rilascio definitivo in produzione resta subordinato al backup
+e agli smoke test CasaOS sopra elencati; non viene dichiarato eseguito un test hardware/Docker che
+questo ambiente non può realmente effettuare.
+
+## 16. Correzione Confirmed — recupero base prima delle conferme massime
+
+Data verifica: **2026-09-28**. Segnalazione: `bug/photo_2026-09-28_19-12-53.jpg`.
+
+Implementata la priorità approvata: sopra base il carico/numero serie non aumenta e le conferme
+massime non si accumulano; quattro successi riducono il recupero di 30 s. Raggiunta la base,
+servono due sessioni massime consecutive con snapshot di recupero validi alla base e nella stessa
+epoch. Reset manuale, copy e gestione legacy sono stati allineati; nessuna riscrittura dello storico.
+
+Verifica finale sul worktree: **759/759 test frontend** (47 file), **20/20 backend**, **6/6 scenari
+browser recovery-first** e **29/29 controlli browser attrezzatura**. Il gate mirato è di 284 test
+in 10 file, incluso nel totale frontend. Build PASS, 11 lingue/907 chiavi allineate, solver 2.000
+confronti PASS. Nessuna regressione rilevata nei test eseguiti.
+
+Matrice dettagliata, vecchie aspettative aggiornate, differenze tra snapshot e prescrizioni future,
+comandi esatti e collaudo manuale: [CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md](CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md).
+
+Correzione pronta per commit dedicato, non ancora committata. Le modifiche offline/sync della
+sezione 15 sono preesistenti e non sono state incluse in un commit cumulativo.

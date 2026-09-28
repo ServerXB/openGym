@@ -128,6 +128,28 @@ function completedSideOrder(sideSequence, finalKeys) {
   return present.concat(finalKeys.filter(key => !seen.has(key)).sort())
 }
 
+function workoutTime(workout) {
+  if (Number.isFinite(workout?.start)) return workout.start
+  if (Number.isFinite(workout?.end)) return workout.end
+  const parsed = typeof workout?.d === 'string' ? Date.parse(`${workout.d}T12:00:00Z`) : NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function domainOrder(path, values) {
+  if (path === '/bodyweight') {
+    return [...values].sort((left, right) => (
+      String(left?.d || left?.date || '').localeCompare(String(right?.d || right?.date || ''))
+    ))
+  }
+  if (path !== '/workouts') return values
+  // Several algorithms read the last array item as the latest workout. Concurrent additions must
+  // therefore converge chronologically, not by a random workout id chosen by the topo-sort tie.
+  return [...values].sort((left, right) => (
+    workoutTime(left) - workoutTime(right)
+    || String(left?.id || '').localeCompare(String(right?.id || ''))
+  ))
+}
+
 function mergeKeyOrder(baseKeys, localKeys, remoteKeys, finalKeys, path, context) {
   const finalSet = new Set(finalKeys)
   const base = baseKeys.filter(key => finalSet.has(key))
@@ -182,7 +204,7 @@ function mergeKeyedArray(base, local, remote, path, context, descriptor) {
     base.map(descriptor.key), local.map(descriptor.key), remote.map(descriptor.key),
     [...merged.keys()], path, context
   )
-  return order.map(key => merged.get(key))
+  return domainOrder(path, order.map(key => merged.get(key)))
 }
 
 function mergeNode(base, local, remote, path, context) {

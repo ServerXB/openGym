@@ -50,6 +50,15 @@ export const DEF = {
 }
 
 const clone = value => JSON.parse(JSON.stringify(value))
+const sameLocalValue = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null)
+
+function mergeLocalActive(base, local, remote) {
+  if (sameLocalValue(local, remote) || sameLocalValue(remote, base)) return local ?? null
+  if (sameLocalValue(local, base)) return remote ?? null
+  // Both tabs intentionally changed the local workout from the same known value. Keep the action
+  // currently being saved; subsequent storage events converge on this last serialized write.
+  return local ?? null
+}
 
 function normalizeDomainState(value) {
   const state = Object.assign(clone(DEF), clone(value || {}))
@@ -137,14 +146,110 @@ export const useStore = create((set, get) => {
     set({ sync: syncView() })
   }
 
-  const saveEnvelope = (next, { updateView = true } = {}) => {
+  const readStoredEnvelope = accountId => {
+    const key = accountStateKey(accountId)
+    try {
+      const raw = localStorage.getItem(key)
+      if (!raw) return { envelope: null, error: null }
+      const parsed = JSON.parse(raw)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+        || !parsed.state || typeof parsed.state !== 'object' || Array.isArray(parsed.state)) {
+        throw new Error('Invalid account envelope')
+      }
+      return { envelope: parsed, error: null }
+    } catch (error) {
+      return {
+        envelope: null,
+        error: {
+          code: 'SYNC_STORAGE_ERROR', operation: 'read-current', key,
+          message: error?.message || String(error || 'Storage unavailable')
+        }
+      }
+    }
+  }
+
+  const saveEnvelope = (next, { updateView = true, mergeStoredActive = true } = {}) => {
     if (storageBlock) {
       runtimeStatus = SYNC_STATUS.STORAGE_ERROR
       set({ sync: publicSync({ ...currentEnvelope.sync, lastError: storageBlock }, runtimeStatus) })
       return false
     }
+    const stored = readStoredEnvelope(next.accountId)
+    if (stored.error) {
+      storageBlock = stored.error
+      runtimeStatus = SYNC_STATUS.STORAGE_ERROR
+      set({ sync: publicSync({ ...currentEnvelope.sync, lastError: stored.error }, runtimeStatus) })
+      return false
+    }
+    let candidate = next
+    if (stored.envelope) {
+      const external = createStateEnvelope({
+        ...stored.envelope,
+        state: normalizeDomainState(stored.envelope.state)
+      })
+      if (next.accountId === GUEST_ACCOUNT
+        && external.sync.guestEpoch !== currentEnvelope.sync.guestEpoch) {
+        // A different tab transferred the guest data into an account. Discard this stale draft
+        // and adopt the fresh guest epoch, so the transferred profile cannot be resurrected.
+        currentEnvelope = external
+        runtimeStatus = null
+        set({ S: external.state, sync: syncView() })
+        return false
+      }
+      const transport = external.sync.revision > next.sync.revision
+        || (external.sync.revision === next.sync.revision
+          && external.sync.localGeneration > next.sync.localGeneration)
+        ? external : next
+      if (!sameSyncState(external.state, currentEnvelope.state)) {
+        const ancestor = external.sync.revision < currentEnvelope.sync.revision
+          ? external.sync.base : currentEnvelope.sync.base
+        const base = normalizeRemoteState(ancestor)
+        // First reconcile what the other tab changed, then apply this operation's delta. Using
+        // only the server base for the second step would lose a deliberate local undo.
+        const aligned = threeWayMerge({ base, local: currentEnvelope.state, remote: external.state })
+        const mergeBase = aligned.clean ? currentEnvelope.state : base
+        const mergeRemote = aligned.clean ? aligned.state : external.state
+        const merged = threeWayMerge({ base: mergeBase, local: next.state, remote: mergeRemote })
+        candidate = createStateEnvelope({
+          accountId: next.accountId,
+          state: { ...normalizeDomainState(merged.state), active: next.state.active, _ts: next.state._ts },
+          sync: transport.sync
+        })
+        const changed = !sameSyncState(candidate.state, transport.state)
+          || (!candidate.sync.pending && !sameSyncState(candidate.state, transport.sync.base))
+        if (changed) {
+          candidate.sync.localGeneration = Math.max(
+            candidate.sync.localGeneration, next.sync.localGeneration, external.sync.localGeneration
+          )
+          candidate = markLocalMutation(candidate, candidate.state)
+        }
+        if (!merged.clean) {
+          candidate = setSyncConflict(candidate, {
+            kind: 'device',
+            base: canonicalizeSyncState(mergeBase),
+            local: canonicalizeSyncState(next.state),
+            remote: canonicalizeSyncState(mergeRemote),
+            conflicts: merged.conflicts,
+            remoteRevision: transport.sync.revision
+          })
+        }
+      } else if (transport === external) {
+        candidate = createStateEnvelope({ ...next, sync: external.sync })
+        if (!sameSyncState(candidate.state, external.state)) candidate = markLocalMutation(candidate, candidate.state)
+      }
+    }
+    if (mergeStoredActive && stored.envelope) {
+      const active = mergeLocalActive(
+        currentEnvelope.state?.active,
+        candidate.state?.active,
+        stored.envelope.state?.active
+      )
+      if (!sameLocalValue(active, candidate.state?.active)) {
+        candidate = { ...candidate, state: { ...candidate.state, active: clone(active) } }
+      }
+    }
     try {
-      const saved = saveAccountEnvelope(localStorage, next)
+      const saved = saveAccountEnvelope(localStorage, candidate)
       currentEnvelope = saved.envelope
       try {
         // gym_state_v1 is an import source, not a second continuously-updated profile copy.
@@ -230,28 +335,63 @@ export const useStore = create((set, get) => {
     const target = accountId || GUEST_ACCOUNT
     if (target === currentAccountId) return true
     const previousAccount = currentAccountId
-    const previous = currentEnvelope
+    let previous = currentEnvelope
+    let guestTransferError = null
+    if (carryGuest && previousAccount === GUEST_ACCOUNT) {
+      // Every successful guest edit is persisted synchronously. Read that authoritative copy
+      // before transferring it: this tab may not yet have received another tab's storage event,
+      // including the fresh empty epoch left by an earlier transfer into a different account.
+      const storedGuest = readStoredEnvelope(GUEST_ACCOUNT)
+      guestTransferError = storedGuest.error
+      if (storedGuest.envelope) {
+        previous = createStateEnvelope({
+          ...storedGuest.envelope,
+          state: normalizeDomainState(storedGuest.envelope.state)
+        })
+      }
+    }
     const loaded = loadEnvelope(target)
     let next = loaded.envelope
+    let transferredGuest = false
 
     // A guest can deliberately turn the current local profile into a new account. Existing
     // account data is never replaced: if this is a sign-in rather than registration, the first
     // pull performs a safe three-way merge (or exposes a conflict).
-    if (carryGuest && previousAccount === GUEST_ACCOUNT && loaded.source === 'default' && hasData(previous.state)) {
+    if (carryGuest && !guestTransferError && previousAccount === GUEST_ACCOUNT
+      && loaded.source === 'default' && hasData(previous.state)) {
       next = createStateEnvelope({ accountId: target, state: previous.state })
       next = markLocalMutation(next, previous.state)
+      transferredGuest = true
     }
 
     currentAccountId = target
     currentEnvelope = next
-    storageBlock = loaded.storageError || null
-    runtimeStatus = loaded.storageError ? SYNC_STATUS.STORAGE_ERROR : null
+    storageBlock = loaded.storageError || guestTransferError || null
+    runtimeStatus = storageBlock ? SYNC_STATUS.STORAGE_ERROR : null
     registerCustom(next.state.customEx)
     if (storageBlock) {
       set({ S: next.state, sync: syncView() })
       return false
     }
-    return saveEnvelope(next)
+    const saved = saveEnvelope(next)
+    if (saved && transferredGuest) {
+      try {
+        saveAccountEnvelope(localStorage, createStateEnvelope({
+          accountId: GUEST_ACCOUNT,
+          state: clone(DEF),
+          sync: { guestEpoch: createMutationId() }
+        }))
+      } catch (error) {
+        storageBlock = {
+          code: 'SYNC_STORAGE_ERROR', operation: 'clear-transferred-guest',
+          key: accountStateKey(GUEST_ACCOUNT), message: error?.message || String(error)
+        }
+        runtimeStatus = SYNC_STATUS.STORAGE_ERROR
+        set({ sync: publicSync({ ...currentEnvelope.sync, lastError: storageBlock }, runtimeStatus) })
+        return false
+      }
+    }
+    return saved
   }
 
   function removeCurrentAccountCopy(accountId) {
@@ -270,6 +410,60 @@ export const useStore = create((set, get) => {
     } catch { /* UI state below still ends the session */ }
     set({ user: null })
     activateAccount(GUEST_ACCOUNT)
+  }
+
+  function assertSafeToSignOut(accountId, { allowPending = false } = {}) {
+    if (currentAccountId !== accountId || get().user?.id !== accountId) {
+      throw Object.assign(new Error('The active account changed'), { code: 'ACCOUNT_CHANGED' })
+    }
+    if (storageBlock) {
+      throw Object.assign(new Error('Local storage must be repaired before signing out'), {
+        code: 'SYNC_STORAGE_ERROR'
+      })
+    }
+    const stored = readStoredEnvelope(accountId)
+    if (stored.error) {
+      storageBlock = stored.error
+      runtimeStatus = SYNC_STATUS.STORAGE_ERROR
+      set({ sync: publicSync({ ...currentEnvelope.sync, lastError: stored.error }, runtimeStatus) })
+      throw Object.assign(new Error(stored.error.message), { code: 'SYNC_STORAGE_ERROR' })
+    }
+    if (currentEnvelope.state.active || stored.envelope?.state?.active) {
+      throw Object.assign(new Error('Finish or discard the active workout before signing out'), {
+        code: 'ACTIVE_WORKOUT'
+      })
+    }
+    const externalPending = stored.envelope?.sync?.pending || stored.envelope?.sync?.conflict
+    const externalChanged = stored.envelope && !sameSyncState(stored.envelope.state, currentEnvelope.state)
+    if ((!allowPending && (currentEnvelope.sync.pending || currentEnvelope.sync.conflict || externalPending))
+      || (externalPending && externalChanged)) {
+      throw Object.assign(new Error('Unsynced changes are still stored on this device'), { code: 'SYNC_PENDING' })
+    }
+  }
+
+  async function signOutSafely(path) {
+    const accountId = currentAccountId
+    assertSafeToSignOut(accountId, { allowPending: true })
+    await runSync(false)
+    assertSafeToSignOut(accountId)
+    const syncedState = canonicalizeSyncState(currentEnvelope.state)
+    await api(path, { method: 'POST', body: '{}' })
+    // Another tab or a user action can edit state while the logout response is in flight.
+    // The server session is now gone: retain the local replica and request a fresh login.
+    try {
+      assertSafeToSignOut(accountId)
+      const stored = readStoredEnvelope(accountId)
+      if (!sameSyncState(currentEnvelope.state, syncedState)
+        || (stored.envelope && !sameSyncState(stored.envelope.state, syncedState))) {
+        throw Object.assign(new Error('Data changed while signing out'), { code: 'SYNC_PENDING' })
+      }
+    } catch (error) {
+      if (error.code === 'ACCOUNT_CHANGED') throw error
+      storeSyncStatus(SYNC_STATUS.AUTH_REQUIRED, { code: 'SIGN_OUT_REAUTH_REQUIRED', message: error.message })
+      setRuntimeStatus(SYNC_STATUS.AUTH_REQUIRED)
+      throw Object.assign(new Error('Sign in again to sync'), { code: 'SIGN_OUT_REAUTH_REQUIRED' })
+    }
+    clearLocalSession(accountId)
   }
 
   function storeSyncStatus(status, error = null) {
@@ -301,7 +495,10 @@ export const useStore = create((set, get) => {
     return false
   }
 
-  function reconcileRemote(remoteState, revision) {
+  const isCurrentAccount = accountId => currentAccountId === accountId && get().user?.id === accountId
+
+  function reconcileRemote(remoteState, revision, expectedAccountId = null) {
+    if (expectedAccountId && !isCurrentAccount(expectedAccountId)) return false
     const remote = normalizeRemoteState(remoteState)
 
     // A GET/412 can be the proof that a request committed before its response was lost. Promote
@@ -332,7 +529,8 @@ export const useStore = create((set, get) => {
     return saveEnvelope(next)
   }
 
-  async function sendPendingSnapshot() {
+  async function sendPendingSnapshot(expectedAccountId) {
+    if (!isCurrentAccount(expectedAccountId)) return false
     let attempt = currentEnvelope.sync.lastAttempt
     if (!attempt) {
       const snapshot = canonicalizeSyncState(currentEnvelope.state)
@@ -359,6 +557,29 @@ export const useStore = create((set, get) => {
           state: attempt.snapshot
         })
       })
+      if (!isCurrentAccount(expectedAccountId)) return false
+      // An idempotent receipt can acknowledge an older revision after another device has already
+      // advanced the server. Read the current head before clearing the durable attempt. If this
+      // GET fails, the same mutation remains pending and can be retried safely.
+      if (response.idempotent) {
+        const awaitingHead = createStateEnvelope({
+          accountId: currentAccountId,
+          state: currentEnvelope.state,
+          sync: {
+            ...currentEnvelope.sync,
+            revision: response.revision,
+            base: attempt.snapshot,
+            pending: true,
+            status: SYNC_STATUS.SYNCING,
+            lastAttempt: attempt
+          }
+        })
+        if (!saveEnvelope(awaitingHead)) return false
+        const head = await api('/api/data')
+        const reconciled = reconcileRemote(head.state, head.revision, expectedAccountId)
+        if (reconciled) retryAttempt = 0
+        return reconciled
+      }
       const acknowledged = acknowledgeSync(currentEnvelope, {
         revision: response.revision,
         serverState: attempt.snapshot,
@@ -370,8 +591,9 @@ export const useStore = create((set, get) => {
       retryAttempt = 0
       return true
     } catch (error) {
+      if (!isCurrentAccount(expectedAccountId)) return false
       if (error.status === 412 && error.data) {
-        return reconcileRemote(error.data.state, error.data.revision)
+        return reconcileRemote(error.data.state, error.data.revision, expectedAccountId)
       }
       if (error.status === 409) {
         // Extremely rare cross-tab/random-id collision: abandon only the rejected transport id,
@@ -391,6 +613,7 @@ export const useStore = create((set, get) => {
 
   async function performSync(forcePull = false) {
     if (!get().user || currentAccountId === GUEST_ACCOUNT || currentEnvelope.sync.conflict) return false
+    const expectedAccountId = currentAccountId
     if (!deviceId) {
       storeSyncStatus(SYNC_STATUS.STORAGE_ERROR, { code: 'DEVICE_ID_UNAVAILABLE', message: 'Device id could not be saved' })
       return false
@@ -398,9 +621,10 @@ export const useStore = create((set, get) => {
     clearRetry()
 
     for (let pass = 0; pass < 12; pass += 1) {
+      if (!isCurrentAccount(expectedAccountId)) return false
       if (currentEnvelope.sync.lastAttempt
         || (currentEnvelope.sync.pending && currentEnvelope.sync.base !== null)) {
-        const progressed = await sendPendingSnapshot()
+        const progressed = await sendPendingSnapshot(expectedAccountId)
         if (!progressed || currentEnvelope.sync.conflict) return false
         if (currentEnvelope.sync.pending) continue
         if (!forcePull) return true
@@ -408,7 +632,8 @@ export const useStore = create((set, get) => {
 
       setRuntimeStatus(SYNC_STATUS.SYNCING)
       const remote = await api('/api/data')
-      if (!reconcileRemote(remote.state, remote.revision)) return false
+      if (!isCurrentAccount(expectedAccountId)) return false
+      if (!reconcileRemote(remote.state, remote.revision, expectedAccountId)) return false
       forcePull = false
       if (!currentEnvelope.sync.pending) {
         retryAttempt = 0
@@ -444,7 +669,18 @@ export const useStore = create((set, get) => {
         syncAgain = false
         const pull = forcePullQueued
         forcePullQueued = false
-        try { result = await performSync(pull) } catch (error) { return handleSyncFailure(error) }
+        const expectedAccountId = currentAccountId
+        try {
+          result = await performSync(pull)
+        } catch (error) {
+          // A rejected request from the account we just left must not mark the newly activated
+          // account offline/auth-required. If that account queued a pull, the next loop handles it.
+          if (!isCurrentAccount(expectedAccountId)) {
+            result = false
+            continue
+          }
+          return handleSyncFailure(error)
+        }
       } while (syncAgain)
       return result
     })().finally(() => { syncPromise = null })
@@ -453,37 +689,23 @@ export const useStore = create((set, get) => {
 
   function mergeExternalEnvelope(external) {
     if (external.accountId !== currentAccountId) return
-    if (sameSyncState(external.state, currentEnvelope.state)) {
-      if (external.sync.revision > currentEnvelope.sync.revision
-        || external.sync.localGeneration > currentEnvelope.sync.localGeneration) {
-        currentEnvelope = external
-        runtimeStatus = null
-        set({ S: external.state, sync: syncView() })
-      }
+    if (sameLocalValue(external, currentEnvelope)) return
+    if (sameSyncState(external.state, currentEnvelope.state)
+      && sameLocalValue(external.state.active, currentEnvelope.state.active)
+      && external.sync.revision >= currentEnvelope.sync.revision
+      && (external.sync.revision > currentEnvelope.sync.revision
+        || external.sync.localGeneration >= currentEnvelope.sync.localGeneration)) {
+      // Adopting an already converged copy must not write it back: that would bounce local-only
+      // timestamps between tabs and generate an endless stream of storage events.
+      currentEnvelope = external
+      runtimeStatus = null
+      set({ S: external.state, sync: syncView() })
       return
     }
-
-    const base = currentEnvelope.sync.base || external.sync.base || normalizeRemoteState(null)
-    const local = canonicalizeSyncState(currentEnvelope.state)
-    const remote = canonicalizeSyncState(external.state)
-    const merged = threeWayMerge({ base, local, remote })
-    const localActive = currentEnvelope.state.active
-    const transport = external.sync.revision >= currentEnvelope.sync.revision
-      ? external : currentEnvelope
-    if (!merged.clean) {
-      currentEnvelope = transport
-      saveConflict(merged, {
-        base, local, remote, revision: transport.sync.revision, kind: 'device', active: localActive
-      })
-      return
-    }
-
-    const state = stateFromCanonical(merged.state, currentEnvelope.state.active)
-    currentEnvelope = transport
-    let next = createStateEnvelope({ accountId: currentAccountId, state, sync: transport.sync })
-    if (!sameSyncState(state, transport.state)) next = markLocalMutation(next, state)
-    saveEnvelope(next)
-    if (next.sync.pending) schedulePush(0)
+    runtimeStatus = null
+    // saveEnvelope reads the latest persisted copy again, so queued events cannot resurrect an
+    // obsolete snapshot. The same reconciliation also protects saves made before this event.
+    if (saveEnvelope(currentEnvelope) && currentEnvelope.sync.pending) schedulePush(0)
   }
 
   // A setting changed right before switching away/closing the tab must not get lost mid-debounce.
@@ -590,25 +812,9 @@ export const useStore = create((set, get) => {
       return true
     },
 
-    async signOut() {
-      const accountId = currentAccountId
-      await runSync(false)
-      if (currentEnvelope.sync.pending || currentEnvelope.sync.conflict) {
-        throw Object.assign(new Error('Unsynced changes are still stored on this device'), { code: 'SYNC_PENDING' })
-      }
-      await api('/api/logout', { method: 'POST', body: '{}' })
-      clearLocalSession(accountId)
-    },
+    signOut() { return signOutSafely('/api/logout') },
 
-    async signOutAll() {
-      const accountId = currentAccountId
-      await runSync(false)
-      if (currentEnvelope.sync.pending || currentEnvelope.sync.conflict) {
-        throw Object.assign(new Error('Unsynced changes are still stored on this device'), { code: 'SYNC_PENDING' })
-      }
-      await api('/api/logout/all', { method: 'POST', body: '{}' })
-      clearLocalSession(accountId)
-    },
+    signOutAll() { return signOutSafely('/api/logout/all') },
 
     // Demo build only: drop the seeded example profile back in (Settings → "Reset demo data").
     async resetDemo() {

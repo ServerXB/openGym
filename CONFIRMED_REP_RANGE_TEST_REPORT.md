@@ -1,5 +1,10 @@
 # Confirmed Rep-Range — Test Report
 
+> Aggiornamento 2026-09-28: la regola storica dei due contatori paralleli e del reset che
+> preservava le conferme massime è superata dalla nuova priorità **recupero base → due conferme**.
+> Le esecuzioni e le decisioni precedenti restano qui come storico, non come specifica corrente.
+> Specifica aggiornata, impatti sui dati e test: [report recovery-first](CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md).
+
 ## Metadata
 
 - Date: 2026-08-23

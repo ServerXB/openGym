@@ -138,6 +138,7 @@ export function createSyncMetadata(overrides = {}) {
     : null
 
   return {
+    ...(typeof overrides.guestEpoch === 'string' ? { guestEpoch: overrides.guestEpoch } : {}),
     protocol: SYNC_PROTOCOL_VERSION,
     revision: Math.max(0, Number.isSafeInteger(overrides.revision) ? overrides.revision : 0),
     base: overrides.base == null ? null : canonicalizeSyncState(overrides.base),

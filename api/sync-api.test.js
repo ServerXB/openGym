@@ -13,6 +13,7 @@ const SECRET = 'backend-integration-test-secret';
 const USER_ID = 'integration-user';
 const LEGACY_USER_ID = 'legacy-user';
 const RACE_USER_ID = 'race-user';
+const ISOLATED_USER_ID = 'isolated-user';
 let child;
 let dataDirectory;
 let baseUrl;
@@ -64,7 +65,8 @@ describe('revisioned /api/data protocol', () => {
       users: [
         { id: USER_ID, name: 'Integration User' },
         { id: LEGACY_USER_ID, name: 'Legacy User' },
-        { id: RACE_USER_ID, name: 'Race User' }
+        { id: RACE_USER_ID, name: 'Race User' },
+        { id: ISOLATED_USER_ID, name: 'Isolated User' }
       ],
       creds: [], subs: [], invites: []
     }));
@@ -140,6 +142,29 @@ describe('revisioned /api/data protocol', () => {
     assert.deepEqual(await read.json(), {
       state: { workouts: [{ id: 'w1' }] }, revision: 1, syncProtocol: 1
     });
+  });
+
+  it('requires authentication and keeps user state isolated', async () => {
+    const unauthorized = await fetch(`${baseUrl}/api/data`);
+    assert.equal(unauthorized.status, 401);
+
+    const isolatedCookie = signedCookie(ISOLATED_USER_ID);
+    const write = await request('/api/data', {
+      method: 'PUT',
+      headers: { Cookie: isolatedCookie },
+      body: JSON.stringify({
+        state: { routines: [{ id: 'isolated-routine' }] },
+        baseRevision: 0,
+        clientId: 'isolated-phone',
+        mutationId: 'isolated-mutation'
+      })
+    });
+    assert.equal(write.status, 200);
+
+    const isolated = await request('/api/data', { headers: { Cookie: isolatedCookie } });
+    assert.deepEqual((await isolated.json()).state, { routines: [{ id: 'isolated-routine' }] });
+    const primary = await request('/api/data');
+    assert.deepEqual((await primary.json()).state, { workouts: [{ id: 'w1' }] });
   });
 
   it('returns the current snapshot on stale CAS and idempotently acknowledges a retry', async () => {

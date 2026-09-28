@@ -200,7 +200,7 @@ describe('Confirmed Rep-Range workout integration', () => {
       target: {
         ...accelerated,
         prog: 'confirmed_rep_range', reps: target, targetReps: target,
-        rangeStep: 1
+        rangeStep: 1, restBaseSeconds: accelerated.restSeconds
       },
       sets: Array.from({ length: 4 }, () => ({ w: 70, r: 10, done: true }))
     })
@@ -230,7 +230,7 @@ describe('Confirmed Rep-Range workout integration', () => {
       d: `2026-08-0${n}`,
       entries: [{
         id: ID,
-        target: { ...bodyweight, sets: 3, reps: 12, targetReps: 12, prog: 'confirmed_rep_range' },
+        target: { ...bodyweight, sets: 3, reps: 12, targetReps: 12, prog: 'confirmed_rep_range', restBaseSeconds: bodyweight.restSeconds },
         sets: [1, 2, 3].map(() => ({ w: 0, r: 12, done: true }))
       }]
     })))

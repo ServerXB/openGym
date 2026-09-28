@@ -506,7 +506,10 @@ La rimozione del target iniziale non deve:
 - modificare workout passati.
 
 L’aumento del peso azzera soltanto il ciclo delle ripetizioni tornando al minimo. Il recupero
-continua a seguire le proprie regole.
+continua a seguire le proprie regole, ma dal 2026-09-28 l'aumento è subordinato al rientro al
+recupero base e a due conferme massime ottenute alla base stessa. Il reset manuale del recupero
+riavvia anche le conferme; la rimozione del vecchio campo target iniziale resta invece neutra.
+Specifica e test aggiornati: [correzione recovery-first](CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md).
 
 ## 6. CRRP-UX-006/007 — Analisi approfondita UX/UI
 

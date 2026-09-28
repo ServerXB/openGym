@@ -3,6 +3,8 @@
 // Start Vite on 4173 and a dedicated Chromium/Edge instance with remote debugging on 9222,
 // then run this file. It seeds only that temporary browser profile and closes the browser.
 
+import { accountStateKey, createStateEnvelope } from '../src/lib/sync-state.js'
+
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const cdpUrl = process.env.OPENGYM_CDP_URL || 'http://127.0.0.1:9222'
 const appUrl = process.env.OPENGYM_APP_URL || 'http://127.0.0.1:4173'
@@ -82,9 +84,13 @@ const state = {
   activeEquipmentProfileId: equipmentSnapshot.id,
   active: null
 }
-const saveState = () => evaluate(
-  `localStorage.setItem('gym_guest', '1'); localStorage.setItem('gym_state_v1', ${JSON.stringify(JSON.stringify(state))})`
-)
+const guestStateKey = accountStateKey('guest')
+const saveState = () => {
+  const envelope = createStateEnvelope({ accountId: 'guest', state })
+  return evaluate(
+    `localStorage.setItem('gym_guest', '1'); localStorage.setItem(${JSON.stringify(guestStateKey)}, ${JSON.stringify(JSON.stringify(envelope))})`
+  )
+}
 await saveState()
 
 await navigate('/?audit=profiles#/settings/equipment')
@@ -146,11 +152,11 @@ await evaluate(`(() => {
 })()`)
 await waitFor(`document.querySelector('.sheet') === null`, 'equipment item editor save')
 await waitFor(
-  `JSON.parse(localStorage.getItem('gym_state_v1')).equipmentProfiles[0].items[0].denominations.length === 0`,
+  `JSON.parse(localStorage.getItem(${JSON.stringify(guestStateKey)})).state.equipmentProfiles[0].items[0].denominations.length === 0`,
   'empty inventory persistence'
 )
 const profileAfterEditor = await evaluate(
-  `JSON.parse(localStorage.getItem('gym_state_v1')).equipmentProfiles[0]`
+  `JSON.parse(localStorage.getItem(${JSON.stringify(guestStateKey)})).state.equipmentProfiles[0]`
 )
 
 state.active = {

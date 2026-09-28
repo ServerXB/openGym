@@ -601,7 +601,7 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, add
   }
   const resetRest = () => confirmSheet({
     title: t('Reset recovery to {0}s?', persistedDefaults.restSeconds),
-    message: t('Recovery follows this progression. The reset also applies to another routine only when it shares the same progression. Only future workouts are affected; weight, target reps, top-range confirmation and completed workouts stay unchanged. The automatic recovery count restarts.'),
+    message: t('Recovery follows this progression, including routines that share it. Only future workouts are affected; weight, target reps and completed workouts stay unchanged. Maximum confirmations and the automatic recovery count restart.'),
     confirmText: t('Reset to {0}s', persistedDefaults.restSeconds),
     onConfirm: () => {
       update(s => resetConfirmedRepRangeRest(s, { ...persistedConfig, id: ex.id }, {
@@ -740,7 +740,7 @@ function ProgressionFields({ ex, mode, c, setC, existing, routine, unit, bw, add
               : t('Recovery is already at the initial value')}
           </Button>}
         </div>
-        {hasSavedConfirmed && <p className="cfg-help">{t('Changing the initial recovery takes effect after Save and does not reset the effective recovery.')}</p>}
+        {hasSavedConfirmed && <p className="cfg-help">{t('Changing the initial recovery takes effect after Save. It does not reset a higher effective recovery; future recovery cannot go below the new base. Maximum confirmations must be earned at the new base.')}</p>}
       </ConfigGroup>
 
       {previewConfirmed && <section className="cfg-next-preview" aria-live="polite" aria-label={t('Preview after saving')}>

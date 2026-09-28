@@ -97,13 +97,14 @@ describe('Confirmed Rep-Range automatic recovery integration', () => {
     })
   })
 
-  it('still applies the earned reduction when the same prescription increases weight', () => {
+  it('applies the earned reduction but holds weight when maximum reps were reached above base', () => {
     const plan = nextPrescription(state([
       clean(10), clean(11), clean(12), clean(12)
     ]), cfg)
     expect(plan).toMatchObject({
-      weight: 72.5,
-      reps: 8,
+      weight: 70,
+      reps: 12,
+      topRangeStreak: 0,
       restSeconds: 150,
       restSuccessStreak: 0,
       restSource: 'automatic_decrease'
@@ -118,8 +119,9 @@ describe('Confirmed Rep-Range automatic recovery integration', () => {
       inNarrowRange(8), inNarrowRange(9), inNarrowRange(10), inNarrowRange(10)
     ]), narrow)
     expect(plan).toMatchObject({
-      weight: 72.5,
-      reps: 8,
+      weight: 70,
+      reps: 10,
+      topRangeStreak: 0,
       restSeconds: 150,
       restSuccessStreak: 0,
       restSource: 'automatic_decrease'
