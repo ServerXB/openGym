@@ -2657,3 +2657,27 @@ comandi esatti e collaudo manuale: [CONFIRMED_RECOVERY_FIRST_FIX_REPORT.md](CONF
 
 Correzione pronta per commit dedicato, non ancora committata. Le modifiche offline/sync della
 sezione 15 sono preesistenti e non sono state incluse in un commit cumulativo.
+
+## 17. Correzione packaging Docker API — sincronizzazione non disponibile
+
+Data verifica: **2026-09-29**. Base codice di questa verifica: `2cbeaf7`.
+
+Individuato e riprodotto un crash di avvio: `server.js` importa `state-store.js`, ma il
+Dockerfile API non includeva il modulo. Corretto il `COPY` e aggiunto un test che avvia
+il server dai soli file dichiarati dal Dockerfile. Prima del fix il setup fallisce con
+`ERR_MODULE_NOT_FOUND`; dopo il fix passano avvio, autenticazione, sincronizzazione
+revisionata, idempotenza, protezione dalle scritture obsolete e persistenza dopo restart.
+
+Regressione: **23/23 test backend** (3 suite), **759/759 frontend** (47 file), build PASS
+(128 moduli, warning non bloccante sui chunk grandi), 11 lingue/907 chiavi allineate,
+solver **2.000/2.000** confronti PASS. Nessuna regressione rilevata nei test eseguiti.
+
+Il test di packaging usa Node locale v26.3.0 e dipendenze del checkout: Docker/Alpine/Node22
+e l'istanza CasaOS reale non sono stati testati. La causa nel pacchetto è confermata;
+la corrispondenza con l'incidente reale va verificata nei log del target.
+
+Analisi, matrice test, replica e aggiornamento CasaOS senza cancellare dati:
+[SYNC_DOCKER_PACKAGING_FIX_REPORT.md](SYNC_DOCKER_PACKAGING_FIX_REPORT.md).
+
+Fix nel worktree pronto per commit dedicato; nessun commit/push/deploy eseguito per questa
+correzione. Il requisito 17 del backlog resta sospeso per dare priorità a questo incidente.
