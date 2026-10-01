@@ -10,6 +10,7 @@ import { nav } from './lib/nav.js'
 import { starterRoutines } from './lib/starter.js'
 import Media, { Thumb } from './components/Media.jsx'
 import EquipmentGuide from './components/EquipmentGuide.jsx'
+import { ConfirmedExerciseReview } from './components/ConfirmedStallAssistant.jsx'
 import Stepper from './components/Stepper.jsx'
 import Icon from './components/Icon.jsx'
 import { Button, Slider, Switch, Segmented, SelectRow, Row } from './components/ui.jsx'
@@ -1370,6 +1371,7 @@ function TopWeight({ entryIdx, close }) {
       ? t('Confirm your top weight for the record. Confirmed Rep-Range changes its working load only when every prescribed set uses the same load.')
       : t('Confirm the weight you worked with — your highest becomes the default next time.')}{!unitDone && unit.length > 1 ? ' ' + t('Then finish the superset partner.') : ''}</div>
     <WeightInput value={v} setValue={setV} unit={st.unit} load />
+    {confirmed && <ConfirmedExerciseReview entryIdx={entryIdx} expanded />}
     <div style={{ height: 10 }} />
     {prevBest > 0 ? <div className="small dim" style={{ textAlign: 'center', marginBottom: 12 }}>{t('Previous best:')} {fmtLoad(prevBest)} {st.unit}{maxSet > prevBest && <span style={{ color: 'var(--yellow)' }}> — {t('new record!')}</span>}</div> : <div style={{ height: 4 }} />}
     {unitDone ? <>

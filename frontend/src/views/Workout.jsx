@@ -12,6 +12,7 @@ import Media from '../components/Media.jsx'
 import { startFlow, exercisePicker, exConfigSheet, exerciseDetailSheet, topWeightSheet, finishWorkout, workoutCompleteSheet, confirmSheet, discardActiveWorkout } from '../sheets.jsx'
 import Icon from '../components/Icon.jsx'
 import EquipmentGuide from '../components/EquipmentGuide.jsx'
+import ConfirmedStallAssistant, { ConfirmedExerciseReview } from '../components/ConfirmedStallAssistant.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
@@ -154,6 +155,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
       <Icon name="timer" />
       <span>{t(...plan.restWhy)}</span>
     </div>}
+    <ConfirmedStallAssistant entryIdx={entryIdx} />
     <div className="card" style={{ marginTop: 10, marginBottom: 0 }}>
       {/* the header carries the same eff3 sizing as the rows, or the labels drift off their columns */}
       <div className={'sethead' + (col3 ? ' eff3' : '')}><span className="n-sp" /><span className="w-sp">{col1.hd}</span>{col2 && <span className="r-sp">{col2.hd}</span>}{col3 && <span className="eff-sp">{col3.hd}</span>}{timed && <span className="ck-sp" />}<span className="ck-sp" /></div>
@@ -186,6 +188,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
         </Button>
       </>}
     </div>
+    <ConfirmedExerciseReview entryIdx={entryIdx} />
   </>
 }
 

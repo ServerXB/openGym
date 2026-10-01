@@ -41,6 +41,7 @@ export function completedWorkoutEntry(entry) {
     sets: entry.sets,
     topW: entry.topW || null,
     target: entry.target || null,
+    ...(entry.review ? { review: { ...entry.review } } : {}),
     ...(entry.equipmentUse ? { equipmentUse: entry.equipmentUse } : {})
   }
 }

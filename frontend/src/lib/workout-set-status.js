@@ -76,6 +76,7 @@ export function invalidateEntryReview(entry, { optionalOnly = false } = {}) {
   if (optionalOnly && entry.target?.prog === 'confirmed_rep_range') return
   delete entry.asked
   delete entry.topW
+  delete entry.review
 }
 
 const nonEmptyId = value =>

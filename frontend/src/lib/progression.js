@@ -20,6 +20,7 @@ import { modeOf, repStep } from './history.js'
 import { EXIDX } from './exercises.js'
 import { confirmedRepRangeConfig } from './confirmedRepRangeConfig.js'
 import { confirmedRepRangeRestControl } from './confirmedRepRangeRest.js'
+import { confirmedRepRangeLoadControl } from './confirmedRepRangeLoad.js'
 import {
   CONFIRMED_REST_DECREASE_AFTER_SUCCESSES,
   CONFIRMED_REST_REDUCTION_AFTER_SUCCESSES,
@@ -284,10 +285,16 @@ export function confirmedRepRangeSession(entry, fallback) {
   const laterMiss = goal != null && prescribed.slice(1).some(set =>
     !!set?.done && (Number(set.r) || 0) < goal
   )
+  const technique = ['clean', 'degraded'].includes(entry?.review?.technique)
+    ? entry.review.technique : 'unknown'
+  const failureReason = ['performance', 'technique', 'pain', 'illness', 'equipment', 'time'].includes(entry?.review?.failureReason)
+    ? entry.review.failureReason : null
 
   let outcome = 'incomplete'
   let validatedReps = null
-  if (complete && goal == null) outcome = 'legacy_unknown'
+  if (complete && ['pain', 'illness', 'equipment', 'time'].includes(failureReason)) outcome = 'interrupted'
+  else if (complete && (technique === 'degraded' || failureReason === 'technique')) outcome = 'technique_failed'
+  else if (complete && goal == null) outcome = 'legacy_unknown'
   else if (complete && minCompletedReps < goal) outcome = 'failed'
   else if (complete && !loadUniform) outcome = 'mixed_load'
   else if (complete && range && minCompletedReps < range.minReps) {
@@ -325,6 +332,10 @@ export function confirmedRepRangeSession(entry, fallback) {
     rangeStep: range?.step ?? null,
     rangeKey: range?.key ?? null,
     loadMode,
+    technique,
+    failureReason,
+    loadEpochId: snapshotId(target.loadEpochId),
+    stallDetectionVersion: target.stallDetectionVersion === 1 ? 1 : null,
     setBaselineId,
     progressionKey: range ? `${range.key}|sets:${setBaselineId || 'legacy'}|load:${loadMode}` : null,
     loadUniform,
@@ -375,12 +386,13 @@ function confirmedSessionsFor(S, exId, fallback) {
 // the same load; otherwise an isolated edited set (or a mixed-load workout) would silently
 // become the next prescription. Other reps policies keep their established max-load reading
 // when they provide the baseline for a first switch to Confirmed.
-function confirmedOperationalHistoryWeight(S, cfg) {
+function confirmedOperationalHistoryWeight(S, cfg, loadControl = null) {
   if (isPureBodyweight(cfg)) return 0
   let weight = null
   const progressionId = cfg?.progressionId
   ;(S.workouts || []).forEach(workout => {
     const entry = findWorkoutProgressionEntry(S, workout, cfg.id, progressionId)
+    if (loadControl && entry?.target?.loadEpochId !== loadControl.epochId) return
     if (!entry?.sets?.some(set => set?.done)
       || !entryMatchesExerciseLoadMode(entry, cfg)) return
 
@@ -467,6 +479,8 @@ function confirmedRepRangeRecovery(sessions, control, initialRest, maxRest) {
         ? ['Recovery stays at {0}s — the historical target is unavailable.', rest]
       : last.outcome === 'mixed_load'
         ? ['Recovery stays at {0}s — prescribed sets used different loads.', rest]
+      : last.outcome === 'technique_failed' || last.outcome === 'interrupted'
+        ? ['Recovery stays at {0}s.', rest]
         : last.firstHit
           ? ['Recovery stays at {0}s.', rest]
           : ['The first set missed the target — recovery stays at {0}s.', rest]
@@ -559,14 +573,32 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   const inc = loadIncrementFor(cfg, unit)
   const initialRest = normalized.restSeconds
   const maxRest = normalized.maxRestSeconds
-  const sessions = confirmedSessionsFor(S, cfg.id, cfg)
+  const allSessions = confirmedSessionsFor(S, cfg.id, cfg)
+  const loadControl = confirmedRepRangeLoadControl(S, cfg)
+  const sessions = loadControl
+    ? allSessions.filter(session => session.loadEpochId === loadControl.epochId)
+    : allSessions
   const latest = sessions[sessions.length - 1]
-  const recovery = confirmedRepRangeRecovery(sessions, confirmedRepRangeRestControl(S, cfg), initialRest, maxRest)
+  const recovery = confirmedRepRangeRecovery(allSessions, confirmedRepRangeRestControl(S, cfg), initialRest, maxRest)
   const rangePlan = {
     policy: 'confirmed_rep_range',
+    stallDetectionVersion: 1,
+    ...(loadControl ? { loadEpochId: loadControl.epochId } : {}),
     ...(!pureBodyweight ? { inc } : {}),
     minReps, maxReps, rangeStep,
     ...(currentSetBaselineId ? { setBaselineId: currentSetBaselineId } : {})
+  }
+
+  // Accepting is a future-only baseline, not a rewrite of the active session or the
+  // operational weight map. Starting, discarding, incomplete and mixed-load workouts do
+  // not consume it. A completed uniform exposure in this exact epoch makes it operative.
+  if (loadControl && !sessions.some(session => session.complete && session.loadUniform)) {
+    return {
+      ...rangePlan, kind: 'hold', weight: loadControl.baselineWeight, reps: minReps,
+      ...confirmedRepRangeRestPlan(recovery, allSessions, normalized, allSessions.at(-1)),
+      topRangeStreak: 0, loadResetPending: true,
+      why: ['Load reduction accepted: {0} {1}; restart at {2} reps. Recovery is unchanged.', loadControl.baselineWeight, unit, minReps]
+    }
   }
 
   // A range edit opens a new deterministic progression block. Sessions keep their own frozen
@@ -582,14 +614,14 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   }
   const last = progressionSessions[progressionSessions.length - 1]
 
-  const historyWeight = confirmedOperationalHistoryWeight(S, cfg)
+  const historyWeight = confirmedOperationalHistoryWeight(S, cfg, loadControl)
   const trackedWeight = cfg.progressionId && confirmedTrackedWeightIsCompatible(S, cfg)
     ? snapshotLoad(S.progressionWeights?.[cfg.progressionId]?.w)
     : null
   const operationalWeight = pureBodyweight ? 0 : historyWeight ?? trackedWeight
 
   if (!last) {
-    const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, latest)
+    const restPlan = confirmedRepRangeRestPlan(recovery, allSessions, normalized, allSessions.at(-1))
     // "First Confirmed" means no history for this policy, not necessarily no history for the
     // exercise. Preserve the most recent operational load from another reps policy so plan,
     // snapshot and generated sets all describe the same prescription. Time-mode history does
@@ -624,7 +656,7 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
     ? { sets: bodyweightSets }
     : {}
   let streak = 0
-  const restPlan = confirmedRepRangeRestPlan(recovery, sessions, normalized, last)
+  const restPlan = confirmedRepRangeRestPlan(recovery, allSessions, normalized, allSessions.at(-1))
   if (last.topRangeSuccess) {
     for (let i = progressionSessions.length - 1; i >= 0; i--) {
       const session = progressionSessions[i]
@@ -640,6 +672,10 @@ export function confirmedRepRangeProgression(S, cfg, unit = 'kg') {
   if (!last.ok) {
     const why = last.outcome === 'incomplete'
       ? ['The prescription was incomplete — weight and target stay unchanged.']
+      : last.outcome === 'technique_failed'
+        ? ['Technique was marked as compromised — weight and target stay unchanged.']
+      : last.outcome === 'interrupted'
+        ? ['The exercise was interrupted — weight and target stay unchanged.']
       : last.outcome === 'legacy_unknown'
         ? ['The historical target is unavailable — the current prescription starts from its minimum.']
       : last.outcome === 'mixed_load'

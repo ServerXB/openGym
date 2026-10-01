@@ -1,14 +1,14 @@
 # openGym — Analisi funzionale e architetturale del backlog prodotto
 
-- Data: 2026-09-28
+- Data: 2026-10-01
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
-- Revisione del codice verificata: `6279f0a`, con hardening successivo pronto per commit
-- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12, 14 e 15
+- Revisione di partenza per il rilascio 17: `5925ae6` (fix packaging offline già committato)
+- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12, 14, 15 e 17
 - Ambito: requisiti 1–17 e relativa estensione 7A comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: correzione Confirmed recovery-first (prima recupero base, poi due conferme massime); replica offline e sincronizzazione revisionata restano implementate
-- Ultimo aggiornamento backlog: aggiunti il requisito 16, storico delle ultime quattro sessioni nel workout, e il requisito 17, rilevazione dello stallo Confirmed con riduzione controllata del carico; solo analisi, sviluppo non autorizzato
-- Priorità di sviluppo: chiuso il requisito 15, il prossimo requisito approvato è 2A; seguono 16, 17, 4 e 10; il requisito 13 non è ancora autorizzato allo sviluppo e i requisiti 8 e 9 restano esclusi
+- Ultimo aggiornamento funzionale: requisito 17 implementato, con assistente manuale allo stallo, review tecnica e nuova epoca di carico; recupero recovery-first e sync restano invariati
+- Ultimo aggiornamento backlog: 17 completato e verificato; 16 autorizzato, prossimo da sviluppare dopo la pausa al commit del 17
+- Priorità approvata: 17 completato → 16 → 2A → 4 → 10. Un requisito per commit, pausa al commit; il requisito 13 non è ancora autorizzato e i requisiti 8 e 9 restano esclusi
 
 ## 1. Obiettivo
 
@@ -48,7 +48,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 14 | Richiesta del peso corporeo configurabile | **Completato** | Switch persistente nelle Impostazioni; opt-out salta il popup senza alterare le misurazioni | P1 | Piccola |
 | 15 | Funzionamento offline e sync alla riconnessione | **Completato** | App shell precacheata, replica per account, CAS/idempotenza, retry, merge a tre vie, conflitti e logout sicuro | P0 | Grande/Epic |
 | 16 | Ultime quattro sessioni durante il workout | **Non completato** | Esiste soltanto la riga “Ultima volta”; manca una vista scoped, completa e richiamabile delle quattro sessioni precedenti | P1 | Piccola/Media |
-| 17 | Rilevazione stallo Confirmed e riduzione controllata del carico | **Non completato** | Confirmed mantiene indefinitamente carico/target e adatta solo il recupero; non esiste un segnale di qualità tecnica né una regressione spiegabile | P1 proposta | Grande |
+| 17 | Rilevazione stallo Confirmed e riduzione controllata del carico | **Completato** | Assistente manuale, review tecnica, evidenze comparabili e nuova epoca di carico; 104 test dedicati e 28 controlli browser verdi | P1 approvata | Grande |
 
 `Completato` significa che lo scope concordato è presente nel codice ed è coperto da test
 automatici. La colonna `Commit principale` distingue ciò che è già committato dall'eventuale
@@ -1986,7 +1986,7 @@ hardening emersi dalla revisione finale restano separati fino al prossimo commit
 
 #### Obiettivo e stato attuale
 
-**Non completato. Analisi pronta; sviluppo non autorizzato.**
+**Non completato. Sviluppo autorizzato dopo il requisito 17.**
 
 Durante l'esercizio openGym mostra già una riga sintetica `Ultima volta`, ricavata tramite
 `lastEntryFor()`. L'informazione è utile ma non permette di capire l'andamento: manca il confronto
@@ -2124,7 +2124,15 @@ File probabili: nuovo `frontend/src/lib/exercise-session-history.js`, relativo t
 
 #### Decisione scientifica e limite dell'automazione
 
-**Non completato. Analisi pronta; sviluppo non autorizzato.**
+**Completato e verificato il 2026-10-01, prima del requisito 16.** Le soglie restano policy
+di prodotto; nessuna riduzione viene applicata automaticamente. Risultati e replica:
+[CONFIRMED_STALL_ASSISTANT_TEST_REPORT.md](CONFIRMED_STALL_ASSISTANT_TEST_REPORT.md).
+
+Dettagli definiti nell'implementazione v1: pausa superiore a 28 giorni su `end/start` reali
+(data come fallback); rifiuto/rinvio sopprimono lo stesso assessment fino a nuove evidenze;
+carichi proposti non positivi richiedono una modifica manuale della configurazione, senza
+cambio implicito da zavorra a corpo libero. Il ritorno al precedente carico richiede un aumento
+Confirmed realmente maturato, non una variazione manuale arbitraria.
 
 Non esiste in letteratura una soglia validata del tipo “dopo esattamente N sessioni riduci il
 carico del X%”. È difficile distinguere un plateau reale da una flessione breve; gli studi diretti
@@ -2146,9 +2154,9 @@ La v1 deve quindi essere un **assistente decisionale**, mai un decremento silenz
 rilevare una mancata progressione numerica; soltanto l'utente può dichiarare che le ripetizioni
 erano tecnicamente compromesse.
 
-#### Stato attuale dell'algoritmo
+#### Stato precedente dell'algoritmo (prima del requisito 17)
 
-Confirmed Rep-Range oggi:
+Prima di questo rilascio, Confirmed Rep-Range:
 
 - aumenta il target dopo una sessione riuscita e valida anche livelli superiori dimostrati da
   tutte le serie;
@@ -2164,7 +2172,7 @@ Applicare direttamente la regola generica “tre miss, −10%” sarebbe scorret
 incomplete, mixed load, recupero ancora in adattamento, target/configurazioni differenti e
 istanze omonime.
 
-#### Policy proposta: `confirmed_stall_assistant_v1`
+#### Policy implementata: `confirmed_stall_assistant_v1`
 
 Una sessione è comparabile soltanto se:
 
@@ -2183,12 +2191,13 @@ l'evidenza informativa ma non deve produrre automaticamente un avviso.
 Lo score prestazionale deriva solo dalle serie prescritte:
 
 ```text
-1. livello minimo pulito dimostrato da tutte le serie
+1. minimo di ripetizioni delle serie prescritte, limitato al target
 2. numero di serie che raggiungono il target
 3. somma delle ripetizioni, con ogni serie limitata al target
 ```
 
-Lo score è confrontato in quest'ordine. Un miglioramento reale apre una nuova osservazione anche
+Lo score è numerico: non certifica la tecnica, che viene dichiarata separatamente.
+È confrontato in quest'ordine. Un miglioramento reale apre una nuova osservazione anche
 se il target completo non è ancora raggiunto.
 
 Stati proposti:
@@ -2270,7 +2279,7 @@ precedenti:
 ```text
 Possibile stallo
 3 sessioni comparabili senza progresso a 70 kg.
-Proposta per il prossimo allenamento: 66 kg · target 8
+Proposta per il prossimo allenamento: 64 kg · target 8 (incremento 2 kg)
 [Applica dal prossimo allenamento] [Mantieni] [Dettagli]
 ```
 
@@ -2294,7 +2303,9 @@ Campi opzionali del nuovo workout:
 }
 ```
 
-Controlli persistenti proposti, senza riscrivere lo storico:
+Esempio di controlli persistenti dopo una conferma, senza riscrivere lo storico.
+L'assessment `proposed` è derivato; si persistono solo `accepted`, `dismissed` o `snoozed`.
+Il controllo di carico viene creato soltanto all'accettazione:
 
 ```json
 {
@@ -2302,19 +2313,22 @@ Controlli persistenti proposti, senza riscrivere lo storico:
     "progression-id": {
       "confirmedRepRangeStall": {
         "assessmentId": "stall-id",
-        "status": "proposed | accepted | dismissed | snoozed",
+        "status": "accepted",
         "evidenceWorkoutIds": [],
-        "reason": "numeric_stall | technique_stall | post_increase_failure",
+        "reason": "numeric_stall",
         "fromWeight": 70,
-        "proposedWeight": 66,
-        "effectiveReductionPercent": 5.7
+        "proposedWeight": 64,
+        "effectiveReductionPercent": 8.57,
+        "updatedAt": 1787742000000
       },
       "confirmedRepRangeLoad": {
         "epochId": "load-epoch-id",
-        "baselineWeight": 66,
+        "baselineWeight": 64,
         "resetAt": 1787742000000,
         "reason": "stall",
-        "sourceWorkoutIds": []
+        "sourceWorkoutIds": [],
+        "progressionKey": "8:10:1|sets:legacy|load:external",
+        "loadMode": "external"
       }
     }
   }
@@ -2453,10 +2467,10 @@ Definizioni:
 | 5 | 5 | **Completato** | P1 | Auto-riduzione recupero attiva sulle nuove configurazioni Confirmed | Quick win ad alto valore; i JSON legacy restano manuali | 6 |
 | 6 | 12 | **Completato** | P1 | Mostrare e qualificare data/ora di inizio e fine | Lifecycle deterministico, storico leggibile e base temporale per linking esterno | — |
 | 7 | 14 | **Completato** | P1 | Rendere configurabile la richiesta del peso corporeo | Migliora l'avvio senza modificare misurazioni o compatibilità legacy | — |
-| 8 | 2A | **Non completato** | P1 | Rendere il timer locale persistente e deterministico | Refresh/background non devono perdere o anticipare il countdown; è la base del watch | — |
+| 8 | 17 | **Completato** | P1 approvata | Possibile stallo Confirmed e regressione controllata | Priorità richiesta dall'utente; evidenze dedicate, review, epoch e test completati | 5, 6, 11 |
 | 9 | 7A | **Completato** | P1 | Cavo caricato a dischi con guida per punto/lato | Riusa il solver esistente e rimuove l'ambiguità quotidiana fra pacco pesi e dischi | 7 |
 | 10 | 16 | **Non completato** | P1 | Ultime quattro sessioni nel workout | Migliora subito le decisioni in serie e rende verificabili anche i futuri avvisi di stallo | 6, 11 |
-| 11 | 17 | **Non completato** | P1 proposta | Possibile stallo Confirmed e regressione controllata | Evita lavoro ripetutamente improduttivo senza introdurre un deload automatico non supportato | 5, 6, 11; 16 consigliato |
+| 11 | 2A | **Non completato** | P1 | Rendere il timer locale persistente e deterministico | Successivo a 17 e 16 per priorità esplicita; base per il watch | — |
 | 12 | 4 | **Non completato** | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
 | 13 | 10 | **Non completato** | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
 | 14 | 7 | **Completato** | P2 | Profili attrezzatura, solver e snapshot | Profili per palestra, singolo manubrio, inventario, guida accessibile e nessuna retroattività | 1, 6, snapshot workout |
@@ -2471,10 +2485,10 @@ Gli ID `2A`, `2B` e `2C` non introducono un nuovo requisito: dividono il punto 2
 locale, sincronizzazione server e companion smartwatch. Questa separazione evita di legare la
 correttezza del timer alla disponibilità di un determinato modello di orologio.
 
-Con il requisito 15 completato, il **prossimo requisito non completato e già approvato** è
-**2A — timer locale persistente e deterministico**. Fra le due nuove
-attività, la 16 è la prima implementabile: è read-only e può poi rendere trasparenti le evidenze
-della 17. L'estensione 7A è già committata in `ca68f78`; i requisiti 8 e 9 restano fuori scope.
+Ordine approvato: **17 completato → 16 → 2A → 4 → 10**. Il prossimo sviluppo è **16**.
+Il 17 offre una vista dedicata delle proprie evidenze; non dipende dall'implementazione della
+vista generica delle ultime quattro sessioni prevista dal 16. Pausa al commit di ogni requisito.
+L'estensione 7A è già committata in `ca68f78`; i requisiti 8 e 9 restano fuori scope.
 
 ### Pacchetti di rilascio raccomandati
 
@@ -2492,7 +2506,7 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 
 #### Release A.1 — Assistente allo stallo Confirmed
 
-**Stato: Non iniziata; analisi pronta e sviluppo non autorizzato.**
+**Stato: Completata e verificata automaticamente il 2026-10-01.**
 
 1. Review opzionale di tecnica/motivo a livello esercizio.
 2. Motore puro e versionato `confirmed_stall_assistant_v1`.
@@ -2502,7 +2516,8 @@ attrezzatura e suggerimenti userebbero altrimenti uno scope potenzialmente errat
 6. Gate su vecchi JSON, routine condivise/indipendenti, attrezzatura e no-regression completa.
 
 Il requisito 17 costituisce un solo rilascio/commit reversibile e non va accorpato alle regole del
-recupero. Il requisito 16 può precederlo e fornire la vista delle evidenze.
+recupero. Per ordine approvato, il requisito 16 segue questo rilascio; la vista delle evidenze
+dello stallo è inclusa nel 17 e non completa anticipatamente il 16.
 
 #### Release B — Esperienza quotidiana
 
@@ -2579,8 +2594,8 @@ OS. Supportarle entrambe nella prima release raddoppierebbe test, distribuzione 
 L'inserimento nel backlog non autorizza lo sviluppo:
 
 - requisito 13: validare priorità e tabella `specific_warmup_v1`;
-- requisito 16: la specifica è pronta, ma questo turno autorizza soltanto documentazione;
-- requisito 17: validare soglie prudenziali, review tecnica e riduzione proposta.
+- requisiti 17 e 16: autorizzati, nell'ordine 17 → 16; non richiedono un ulteriore via libera
+  progettuale, resta la pausa al commit di ogni requisito.
 
 Ogni consegna dovrà essere un solo requisito/commit con codice, test automatici, report
 aggiornato, scenari manuali replicabili e no-regression proporzionata al rischio.
@@ -2612,7 +2627,7 @@ scope insieme ai requisiti 8 e 9.
 
 ### Fase 1.1 — stallo Confirmed e regressione controllata
 
-**Stato: Non iniziata; analisi pronta e sviluppo non autorizzato.**
+**Stato: Completata e verificata il 2026-10-01; requisito 16 successivo.**
 
 1. Congelare outcome, recupero adattivo e comparabilità con test di caratterizzazione.
 2. Introdurre review tecnica opzionale e ragioni che non vengono inferite dai numeri.
@@ -2696,7 +2711,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 
 La numerazione seguente conserva le unità logiche definite durante l'analisi e non rappresenta
 l'ordine operativo corrente. Per la sequenza dei prossimi sviluppi fa fede la tabella della
-sezione 7: `2A`, poi 16, 17, 4 e 10.
+sezione 7: **17 completato, poi 16, 2A, 4 e 10**.
 
 1. `test: characterize routine exercise history scopes`
 2. `feat: add stable routine exercise identities`
@@ -2905,15 +2920,14 @@ locali dell'esperienza quotidiana e epic infrastrutturali separate.
 Sono già completati e verificati: isolamento delle istanze (6), progressione dopo modifiche
 manuali (11), corpo libero puro/zavorrato (1), default recupero automatico (5), timestamp (12),
 attrezzatura con snapshot (7), distinzione dei cavi e guida per punto (7A) e richiesta del peso
-corporeo configurabile (14), oltre alla continuità offline con sincronizzazione sicura (15).
+corporeo configurabile (14), continuità offline con sincronizzazione sicura (15) e assistente
+allo stallo Confirmed con review e riduzione confermata (17).
 
-La sequenza residua più sicura proposta è:
+La sequenza approvata dall'utente è:
 
-1. completare 2A, rendendo il timer locale persistente e deterministico;
-2. realizzare la vista read-only delle ultime quattro sessioni (16), la più piccola e sicura fra
-   le due nuove attività;
-3. validare e poi implementare l'assistente allo stallo (17), riusando la vista 16 per rendere
-   verificabile ogni evidenza e senza decremento automatico;
+1. assistente allo stallo (17) completato, con evidenze dedicate e senza decremento automatico;
+2. realizzare la vista read-only delle ultime quattro sessioni (16);
+3. completare 2A, rendendo il timer locale persistente e deterministico;
 4. realizzare rail routine (4) e alias/ricerca centralizzata (10);
 5. avviare il riscaldamento specifico (13) solo dopo l'autorizzazione esplicita;
 6. creare documentazione/contratto API (3), quindi timer multi-device (2B) e companion (2C);
@@ -2921,5 +2935,5 @@ La sequenza residua più sicura proposta è:
 
 Questa sequenza mantiene spiegabile ogni prescrizione, conserva i workout passati e impedisce
 che integrazioni o cambi di palestra modifichino retroattivamente ciò che è già stato registrato.
-Le aggiunte 16 e 17 sono state analizzate e censite soltanto nel backlog: non è stato avviato
-alcuno sviluppo applicativo.
+Lo sviluppo del 17 è completato; il 16 seguirà come requisito separato. Ogni requisito deve
+superare i propri test e la regressione completa, con pausa al commit per consentire il rollback.

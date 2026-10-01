@@ -2,6 +2,7 @@ import { bestWeightFor } from './history.js'
 import { LOAD_MODE, workoutEntryLoadMode } from './exercise-load-mode.js'
 import { is1RMRecordForEntries } from './onerm.js'
 import { progressionIdOf, routineExerciseIdOf } from './progression-scope.js'
+import { confirmedRepRangeLoadControl } from './confirmedRepRangeLoad.js'
 
 const nonEmptyId = value =>
   typeof value === 'string' && value.trim() ? value.trim() : null
@@ -180,6 +181,12 @@ export function applyWorkoutWeights(S, entries, date) {
 
     const working = progressionWorkingWeight(entry)
     if (!(working > 0)) return
+    // A workout frozen before an accepted reduction may finish/sync afterwards. Its
+    // global record remains valid, but it must not overwrite the new scoped baseline.
+    const loadControl = confirmedRepRangeLoadControl(S, {
+      ...entry.target, id: entry.id, progressionId: entry.progressionId
+    })
+    if (loadControl && entry.target?.loadEpochId !== loadControl.epochId) return
     const progressionId = progressionIdOf(entry)
     if (progressionId) S.progressionWeights[progressionId] = { w: working, d: date }
     const futureProgressionId = futureSetCountProgressionId(S, entry)

@@ -2681,3 +2681,28 @@ Analisi, matrice test, replica e aggiornamento CasaOS senza cancellare dati:
 
 Fix nel worktree pronto per commit dedicato; nessun commit/push/deploy eseguito per questa
 correzione. Il requisito 17 del backlog resta sospeso per dare priorità a questo incidente.
+
+## 18. Requisito 17 — Assistente allo stallo Confirmed
+
+Verifica finale: **2026-10-01**. Base codice: `5925ae6`; il fix di packaging della sezione 17
+è già committato. Ripreso e completato il requisito 17 del backlog, prima del requisito 16.
+
+Implementati rilevatore versionato, review tecnica opzionale, card non bloccante e dettagli
+delle evidenze. La riduzione richiede conferma esplicita e apre una nuova epoca di carico solo
+per allenamenti futuri. Recupero, storico e sessione attiva non vengono riscritti. Le soglie
+3/2 e il 7,5% sono policy di prodotto dichiarate, non una diagnosi o un deload automatico.
+
+Gate: **863/863 test frontend** (50 file, inclusi 104 nuovi), **23/23 backend**, build PASS
+(131 moduli, warning non bloccante sui chunk grandi), 11 lingue/954 chiavi, 2.000 confronti
+solver PASS. Browser: **28 controlli requisito 17**, **6 scenari recovery-first** e **29 controlli
+attrezzatura**, tutti PASS. Nessuna regressione rilevata nei test eseguiti.
+
+Risolti durante la verifica anche il confronto di attrezzatura normalizzata, focus in StrictMode,
+transizione fra dialoghi, formattazione delle date e confine temporale dei 28 giorni su `end/start`.
+La fixture HTTP/packaging ora verifica anche review, load epoch e decisione persistenti dopo restart.
+
+Matrice, casi limite, comandi completi di replica, rollback e gate CasaOS/hardware residui:
+[CONFIRMED_STALL_ASSISTANT_TEST_REPORT.md](CONFIRMED_STALL_ASSISTANT_TEST_REPORT.md).
+
+Consegna in commit dedicato al requisito 17; pausa prima dello sviluppo del 16, che resta il
+prossimo requisito autorizzato. Nessun deploy CasaOS o test Docker reale dichiarato.

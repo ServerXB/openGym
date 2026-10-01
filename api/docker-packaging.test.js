@@ -10,7 +10,20 @@ import { after, before, describe, it } from 'node:test';
 const API_DIRECTORY = path.dirname(fileURLToPath(import.meta.url));
 const SECRET = 'docker-packaging-test-secret';
 const USER_ID = 'packaging-user';
-const STATE = { workouts: [{ id: 'offline-workout', date: '2026-09-29', exercises: [] }] };
+const STATE = {
+  workouts: [{ id: 'offline-workout', date: '2026-09-29', entries: [{
+    id: 'lift', progressionId: 'lift-scope',
+    target: { prog: 'confirmed_rep_range', loadEpochId: 'load-1', stallDetectionVersion: 1 },
+    review: { technique: 'degraded', failureReason: 'technique' },
+    sets: [{ w: 64, r: 8, done: true }]
+  }] }],
+  progressionControls: { 'lift-scope': {
+    confirmedRepRangeRest: { epochId: 'rest-1', resetSeconds: 120, resetAt: 1 },
+    confirmedRepRangeStall: { assessmentId: 'assessment-1', status: 'accepted', evidenceWorkoutIds: ['prior-1'] },
+    confirmedRepRangeLoad: { epochId: 'load-1', baselineWeight: 64, resetAt: 2, reason: 'stall',
+      sourceWorkoutIds: ['prior-1'], progressionKey: '8:10:1|sets:legacy|load:external', loadMode: 'external' }
+  } }
+};
 let stagingDirectory;
 let dataDirectory;
 let baseUrl;
