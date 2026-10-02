@@ -2706,3 +2706,31 @@ Matrice, casi limite, comandi completi di replica, rollback e gate CasaOS/hardwa
 
 Consegna in commit dedicato al requisito 17; pausa prima dello sviluppo del 16, che resta il
 prossimo requisito autorizzato. Nessun deploy CasaOS o test Docker reale dichiarato.
+
+## 19. Requisito 16 — Ultime quattro sessioni durante il workout
+
+Verifica finale: **2026-10-02**. Base: `198e827`.
+Implementato pulsante Storico recente con anteprima e sheet di sola lettura: quattro sessioni
+della progressione congelata, obiettivo storico, serie effettive, effort, peso confermato
+separato e attrezzatura storica. Routine indipendenti restano separate e quelle condivise
+sono dichiarate. Le conferme richiedono il predecessore compatibile, con gestione di
+cancellazioni, correzioni, recupero base, epoche, unità e date insufficienti.
+
+Gate: **952/952 frontend** (53 file, 89 nuovi test), **23/23 backend**, build PASS
+(133 moduli, warning noto sui chunk grandi), 11 lingue/988 chiavi e 2.000 confronti solver PASS.
+Browser: **30 controlli requisito 16**, **28 stallo**, **6 recovery-first**, **29 attrezzatura**,
+tutti PASS. Verificati timer in corso/scadenza, callback lavoro una sola volta, zero API dalla
+vista, dati immutati dalla lettura, 320 px, testo al 200%, temi, tastiera, refresh e uso offline.
+Nessuna regressione rilevata nei controlli eseguiti.
+
+Un avvio backend di packaging ha superato il timeout (20 PASS, 3 annullati); una riesecuzione
+completa ha dato 23/23 PASS senza modifiche a backend, timeout o assert. L'harness aveva già
+mostrato questo ritardo occasionale nel requisito 17. CasaOS/Docker e hardware/accessibilità
+fisici restano da collaudare sul target.
+
+Matrice completa, limitazioni e comandi di replica:
+[EXERCISE_SESSION_HISTORY_TEST_REPORT.md](EXERCISE_SESSION_HISTORY_TEST_REPORT.md).
+
+**Nessun commit/push/deploy eseguito per il 16**, per istruzione esplicita dell'utente.
+Nome proposto del commit: `feat: show four scoped exercise sessions during workouts`.
+Il requisito 2A resta il successivo e non è incluso in questa consegna.

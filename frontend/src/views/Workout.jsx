@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore.js'
 import { useUI } from '../store/useUI.js'
 import { exOr } from '../lib/exercises.js'
-import { effectiveRoutine, lastEntryFor, bestWeightFor, supersetUnits, unitOf, setLabel, modeOf, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
-import { fmtLoad, fmtNum, fmtDate, todayISO, uid, exCount, DAYN } from '../lib/format.js'
+import { effectiveRoutine, bestWeightFor, supersetUnits, unitOf, modeOf, isPerSide, sideReps, repStep, EFFORT, effortOf, stepEffort, capEffort } from '../lib/history.js'
+import { fmtLoad, fmtNum, todayISO, uid, exCount, DAYN } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { t } from '../lib/i18n.js'
 import { api } from '../lib/api.js'
@@ -13,6 +13,7 @@ import { startFlow, exercisePicker, exConfigSheet, exerciseDetailSheet, topWeigh
 import Icon from '../components/Icon.jsx'
 import EquipmentGuide from '../components/EquipmentGuide.jsx'
 import ConfirmedStallAssistant, { ConfirmedExerciseReview } from '../components/ConfirmedStallAssistant.jsx'
+import ExerciseSessionHistory from '../components/ExerciseSessionHistory.jsx'
 import { Button, Check, NumberField } from '../components/ui.jsx'
 import { glyphOf } from '../lib/glyphs.js'
 import { restSecondsForUnit } from '../lib/workout-timer.js'
@@ -73,7 +74,6 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
   const mode = modeOf({ ...(entry.target || {}), id: entry.id })
   const cardio = mode === 'cardio'
   const timed = mode === 'time'
-  const last = lastEntryFor(S, entry.id, entry)
   // What the progression policy decided for this session, and why (issue #17). Computed when
   // the session was built so the reason matches the numbers already in the rows.
   const plan = entry.plan
@@ -146,7 +146,7 @@ function ExerciseBlock({ entryIdx, compact, onToggle, onField, onAddSet, onRemov
       {best > 0 && <span className="tag nocap">{t('Best:')} {fmtLoad(best)} {S.unit}</span>}
     </div>
     <EquipmentGuide guide={equipmentGuide} />
-    {last && <div className="small dim" style={{ marginBottom: 4 }}>{t('Last time')} ({fmtDate(last.d)}): {last.sets.map(s => setLabel(entry.id, s, last.target)).join(', ')}</div>}
+    <ExerciseSessionHistory entryIdx={entryIdx} />
     {plan && plan.why && plan.kind !== 'off' && <div className={'progline' + (plan.kind === 'deload' ? ' warn' : '')}>
       <Icon name={plan.kind === 'up' ? 'arrowUp' : plan.kind === 'deload' ? 'arrowDown' : 'lightbulb'} />
       <span>{t(...plan.why)}</span>

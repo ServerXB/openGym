@@ -1083,6 +1083,33 @@ h4.sec{
 .exercise-review select{display:block;width:100%;max-width:100%;min-width:0;min-height:44px;font-size:1rem}
 .review-pain{padding:10px;border:1px solid var(--orange);border-radius:8px;line-height:1.5;margin-top:10px}
 
+/* --- Read-only recent exercise sessions --- */
+.session-history-trigger{display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;min-height:44px;padding:10px 12px;margin-top:12px;border:1px solid var(--sep-op);border-radius:var(--r);background:var(--surface-2);color:var(--label);text-align:left;white-space:normal;overflow-wrap:anywhere}
+.session-history-trigger>span:first-child{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;min-width:0}
+.session-history-trigger strong{font-size:.9rem;font-weight:600}
+.session-history-trigger>span:first-child>span{font-size:.85rem;color:var(--label-2)}
+.session-history-trigger>span:last-child{flex:none;font-size:1.4rem;color:var(--label-2)}
+.session-history-trigger:focus-visible,.session-history-close:focus-visible{outline:2px solid var(--acc);outline-offset:3px}
+.session-history-dialog{min-width:0;max-width:100%;overflow-wrap:anywhere}
+.session-history-heading{display:flex;flex-wrap:wrap;align-items:flex-start;gap:10px}
+.session-history-heading h2{flex:1 1 170px;min-width:0;margin:0;font-size:1.2rem;line-height:1.4}
+.session-history-close{flex:0 1 auto;min-width:44px;min-height:44px;height:auto;white-space:normal;overflow-wrap:anywhere}
+.session-history-dialog>p{line-height:1.5;margin:12px 0}
+.session-history-cards{display:flex;flex-direction:column;gap:12px;margin-top:14px}
+.session-history-card{padding:13px;border:1px solid var(--sep-op);border-radius:var(--r);background:var(--surface-2);min-width:0;line-height:1.5}
+.session-history-card h3{font-size:1rem;line-height:1.5;margin:0;font-weight:600}
+.session-history-card p{margin:9px 0}
+.session-history-card .session-history-routine{margin:3px 0;color:var(--label-2)}
+.session-history-notice{font-size:.85rem;color:var(--acc)}
+.session-history-sets{padding-left:24px;margin:6px 0 12px;display:flex;flex-direction:column;gap:7px}
+.session-history-sets li>span{display:block}
+.session-history-set-status{font-size:.82rem;color:var(--label-2)}
+.session-history-card .session-history-recorded{margin-bottom:4px}
+.session-history-confirmed,.session-history-equipment{font-size:.88rem;color:var(--label-2)}
+.session-history-outcome{padding:8px 10px;border:1px solid var(--sep-op);border-radius:8px;font-weight:600;font-size:.9rem}
+.session-history-outcome[data-history-outcome="success"],.session-history-outcome[data-history-outcome="maximum_first"],.session-history-outcome[data-history-outcome="progression_earned"]{border-color:var(--acc-line);color:var(--acc)}
+.session-history-empty{padding:20px 0;line-height:1.5;color:var(--label-2)}
+
 /* --------------------------------------------------- desktop (≥1000px) --- */
 .cols{display:block}
 @media (min-width:1000px){
