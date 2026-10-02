@@ -4,11 +4,11 @@
 - Branch analizzato: `feature/confirmed-rep-range-progression`
 - Revisione di partenza analizzata: `274ccdf`
 - Revisione di partenza per il rilascio 17: `5925ae6` (fix packaging offline già committato)
-- Stato: completati e verificati i requisiti 1, 5, 6, 7, 7A, 11, 12, 14, 15, 16 e 17
+- Stato: completati e verificati i requisiti 1, 2A, 5, 6, 7, 7A, 11, 12, 14, 15, 16 e 17
 - Ambito: requisiti 1–17 e relativa estensione 7A comunicati dopo l'implementazione Confirmed Rep-Range
-- Ultimo aggiornamento funzionale: requisito 16 implementato, con quattro sessioni scoped richiamabili nel workout, dati storici e conferme verificabili
-- Ultimo aggiornamento backlog: 17 committato in `198e827`; 16 completato e testato nel worktree, senza commit per istruzione dell'utente
-- Priorità approvata: 17 e 16 completati → 2A → 4 → 10. Un requisito per commit; per il 16 pausa prima del commit. Il requisito 13 non è ancora autorizzato e i requisiti 8 e 9 restano esclusi
+- Ultimo aggiornamento funzionale: requisito 2A implementato; timer locali persistenti, revisionati e scoped per workout/serie, con transazioni fra schede
+- Ultimo aggiornamento backlog: 17 committato in `198e827`; 16 committato in `06d95a7`; 2A completo e testato nel worktree, senza commit per istruzione dell'utente
+- Priorità approvata: 17, 16 e 2A completati → 4 → 10. Un requisito per commit; pausa prima del commit mantenuta per il 2A. Il requisito 13 non è ancora autorizzato e i requisiti 8 e 9 restano esclusi
 
 ## 1. Obiettivo
 
@@ -29,8 +29,8 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | ID | Requisito | Stato | Riscontro | Priorità | Dimensione |
 |---|---|---|---|---|---|
 | 1 | Nascondere peso nel corpo libero | **Completato** | Tre modalità di carico, invarianti a peso zero e disclosure zavorra | P1 | Media |
-| 2 | Sincronizzare timer e orologio, epic complessiva | **Non completato** | Nessuna delle tre fasi sottostanti soddisfa ancora integralmente i propri criteri di rilascio | P2 | Grande/Epic |
-| 2A | Timer locale persistente e deterministico | **Non completato** | Esiste la fondazione a deadline, ma il timer è in memoria e si perde al refresh | P1 | Media |
+| 2 | Sincronizzare timer e orologio, epic complessiva | **Non completato** | Fondazione locale 2A completata; server multi-device e smartwatch ancora da realizzare | P2 | Grande/Epic |
+| 2A | Timer locale persistente e deterministico | **Completato** | IndexedDB, clock monotono, revisioni, sync tab e binding serie; 25 controlli browser PASS. Pronto, non committato | P1 | Media |
 | 2B | Timer persistente server e multi-device | **Non completato** | Il server usa una `Map` in RAM, senza record revisionato o ripristino dopo restart | P2 | Grande |
 | 2C | Controllo da smartwatch | **Non completato** | Non esistono companion, pairing o comandi bidirezionali watchOS/Wear OS | P2 | Grande |
 | 3 | Esporre e documentare API | **Non completato** | Esistono endpoint interni, non una API pubblica sicura, versionata e documentata | P2 | Grande |
@@ -47,7 +47,7 @@ esterno può influenzare solo il futuro e non deve reinterpretare retroattivamen
 | 13 | Riscaldamento specifico guidato | **Non completato** | Analisi funzionale pronta; sviluppo non ancora autorizzato | P1 proposta | Media |
 | 14 | Richiesta del peso corporeo configurabile | **Completato** | Switch persistente nelle Impostazioni; opt-out salta il popup senza alterare le misurazioni | P1 | Piccola |
 | 15 | Funzionamento offline e sync alla riconnessione | **Completato** | App shell precacheata, replica per account, CAS/idempotenza, retry, merge a tre vie, conflitti e logout sicuro | P0 | Grande/Epic |
-| 16 | Ultime quattro sessioni durante il workout | **Completato** | Pulsante con anteprima, sheet scoped live, dati storici e 89 test dedicati; 30 controlli browser PASS. Pronto, non committato | P1 | Piccola/Media |
+| 16 | Ultime quattro sessioni durante il workout | **Completato** | Pulsante con anteprima, sheet scoped live, dati storici e 89 test dedicati; 30 controlli browser PASS. Commit `06d95a7` | P1 | Piccola/Media |
 | 17 | Rilevazione stallo Confirmed e riduzione controllata del carico | **Completato** | Assistente manuale, review tecnica, evidenze comparabili e nuova epoca di carico; 104 test dedicati e 28 controlli browser verdi | P1 approvata | Grande |
 
 `Completato` significa che lo scope concordato è presente nel codice ed è coperto da test
@@ -65,9 +65,11 @@ verde: **47/47 file di test e 759/759 test**; anche
 la build Vite di produzione termina con
 successo. Resta il warning non bloccante già noto sui chunk di grandi dimensioni.
 
-Aggiornamento del 2026-10-02: requisito 17 committato (`198e827`), requisito 16 completo nel
-worktree, con **952/952 test frontend** (53 file), **23/23 backend** e collaudi browser verdi.
-Il 16 non è ancora committato. Dettagli e replica:
+Aggiornamento del 2026-10-02: requisito 17 committato (`198e827`), requisito 16 committato
+(`06d95a7`). Al rilascio del 16: **952/952 frontend** (53 file), **23/23 backend** e browser verdi.
+Il 2A è ora pronto, non committato: **1.126/1.126 frontend** (58 file), **32/32 backend**, build,
+localizzazioni e solver PASS; **25 controlli browser timer** e tutte le regressioni browser verdi.
+Dettagli e replica: [LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md](LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md) e
 [EXERCISE_SESSION_HISTORY_TEST_REPORT.md](EXERCISE_SESSION_HISTORY_TEST_REPORT.md).
 
 | ID | Commit principale | Evidenza verificata |
@@ -81,15 +83,16 @@ Il 16 non è ancora committato. Dettagli e replica:
 | 12 | `a438f11` | `workout-time.js`, lifecycle, import e rendering storico |
 | 14 | `1963555` | setting persistente, compatibilità legacy e start flow pianificato/freestyle |
 | 15 | `6279f0a`, hardening pronto | app shell offline, storage per account, CAS/idempotenza, merge, retry, conflitti e UX sync |
-| 16 | Pronto, non committato | `exercise-session-history.js`, `ExerciseSessionHistory.jsx`, test unitari/integrati/SSR e browser |
+| 16 | `06d95a7` | `exercise-session-history.js`, `ExerciseSessionHistory.jsx`, test unitari/integrati/SSR e browser |
+| 2A | Pronto, non committato | `local-timer*.js`, `timed-set-completion.js`, `useUI.js`, lifecycle/account, notifiche e collaudi browser |
 | 17 | `198e827` — `feat: add confirmed stall assistant with explicit future load reset` | rilevazione stallo, review tecnica, decisioni future e nuova epoca di carico |
 
-Per i requisiti non completati l'audit ha verificato anche l'assenza dello scope richiesto, non
-soltanto la mancanza di un'etichetta nel backlog: 2A non persiste il timer, 2B non ha stato server
+Nell'audit iniziale si è verificata anche l'assenza dello scope richiesto, non
+soltanto la mancanza di un'etichetta nel backlog: 2A non persisteva il timer, 2B non ha stato server
 duraturo, 2C non ha companion, 3 non ha contratto API pubblico, 4 non ha rail, 10 non ha alias
 utente, 8/9 non hanno provider, 13 non ha ancora motore o popup, 16 non ha una vista delle quattro
-sessioni e 17 non aveva rilevazione o reset del carico Confirmed. Queste ultime due assenze
-riguardano l'audit iniziale: 16 e 17 sono stati successivamente completati come riportato sopra.
+sessioni e 17 non aveva rilevazione o reset del carico Confirmed. Le assenze relative a 2A, 16 e
+17 riguardano l'audit iniziale: questi requisiti sono stati successivamente completati.
 
 Le correzioni 6 e 11 sono state affrontate prima del requisito 7 perché decidono quale storico
 appartiene a una prescrizione. Questo ha permesso di aggiungere l'attrezzatura per slot senza
@@ -251,17 +254,17 @@ Il requisito può significare tre cose differenti e non vanno confuse:
 
 | Fase | Stato | Verifica |
 |---|---|---|
-| 2A — timer locale | **Non completato** | Deadline già presente, ma nessuna persistenza su refresh/restart, revisione o sync fra tab |
+| 2A — timer locale | **Completato** | Deadline persistente, clock monotono, transazioni IndexedDB, revisioni e sync fra schede; browser restart verificato |
 | 2B — server/multi-device | **Non completato** | Timer push soltanto in RAM e nessun modello di conflitto/ripristino |
 | 2C — smartwatch | **Non completato** | Nessun companion o controllo bidirezionale implementato |
 
-#### Stato attuale
+#### Baseline precedente al requisito 2A
 
 `frontend/src/store/useUI.js` usa già `endsAt = Date.now() + durata` e a ogni tick ricalcola il
 tempo restante. Questo evita il classico errore di decrementare un contatore quando il browser
 ritarda i callback. Esiste anche un tick su `visibilitychange`.
 
-Restano però questi limiti:
+La baseline presentava questi limiti:
 
 - il timer vive solo in memoria e si perde al refresh o alla chiusura;
 - `Date.now()` può saltare se cambia manualmente l'orologio di sistema;
@@ -270,6 +273,16 @@ Restano però questi limiti:
 - un restart Docker perde il timer push;
 - due dispositivi dello stesso utente si sovrascrivono;
 - il secondo dispositivo non vede il countdown del primo.
+
+I primi tre limiti sono stati risolti nel 2A. Il timer locale è ora separato dal profilo sync,
+scoped per account e active workout, persistito in IndexedDB e revisionato. Le serie a tempo
+usano identificativi stabili di entry e riga; chiusura/sostituzione del workout, rimozione della
+serie e cambio account non possono attribuire il risultato al contesto sbagliato. Il consumo
+pendente è recuperabile e legge l'active locale più recente prima di registrare la serie.
+Il server push legacy accetta la stessa deadline assoluta, senza diventare ancora un timer
+multi-device persistente. Gli ultimi quattro limiti restano in carico al **2B**.
+Notifiche native coperte da adapter/test; prove fisiche OS/CasaOS ancora da eseguire.
+Report: [LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md](LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md).
 
 #### MVP raccomandato: timer openGym autoritativo
 
@@ -1994,8 +2007,8 @@ hardening emersi dalla revisione finale restano separati fino al prossimo commit
 
 #### Obiettivo e stato attuale
 
-**Completato e verificato il 2026-10-02. Pronto nel worktree, non committato per istruzione
-dell'utente.** Nome proposto: `feat: show four scoped exercise sessions during workouts`.
+**Completato e verificato il 2026-10-02. Commit `06d95a7`.**
+Nome: `feat: show four scoped exercise sessions during workouts`.
 Report con risultati e comandi di replica:
 [EXERCISE_SESSION_HISTORY_TEST_REPORT.md](EXERCISE_SESSION_HISTORY_TEST_REPORT.md).
 
@@ -2489,8 +2502,8 @@ Definizioni:
 | 7 | 14 | **Completato** | P1 | Rendere configurabile la richiesta del peso corporeo | Migliora l'avvio senza modificare misurazioni o compatibilità legacy | — |
 | 8 | 17 | **Completato** | P1 approvata | Possibile stallo Confirmed e regressione controllata | Priorità richiesta dall'utente; evidenze dedicate, review, epoch e test completati | 5, 6, 11 |
 | 9 | 7A | **Completato** | P1 | Cavo caricato a dischi con guida per punto/lato | Riusa il solver esistente e rimuove l'ambiguità quotidiana fra pacco pesi e dischi | 7 |
-| 10 | 16 | **Completato** | P1 | Ultime quattro sessioni nel workout | Sheet scoped e read-only verificata; pronta nel worktree senza commit | 6, 11 |
-| 11 | 2A | **Non completato** | P1 | Rendere il timer locale persistente e deterministico | Successivo a 17 e 16 per priorità esplicita; base per il watch | — |
+| 10 | 16 | **Completato** | P1 | Ultime quattro sessioni nel workout | Sheet scoped e read-only verificata; commit `06d95a7` | 6, 11 |
+| 11 | 2A | **Completato** | P1 | Rendere il timer locale persistente e deterministico | Fondazione locale verificata, pronta senza commit; server/watch separati | — |
 | 12 | 4 | **Non completato** | P1 | Navigazione scorrevole tra routine | Migliora un flusso frequente con rischio di dominio limitato | identità slot stabilizzata |
 | 13 | 10 | **Non completato** | P1 | Alias esercizi e ricerca centralizzata | Migliora libreria e picker senza modificare l'identità canonica | identità slot stabilizzata |
 | 14 | 7 | **Completato** | P2 | Profili attrezzatura, solver e snapshot | Profili per palestra, singolo manubrio, inventario, guida accessibile e nessuna retroattività | 1, 6, snapshot workout |
@@ -2505,8 +2518,8 @@ Gli ID `2A`, `2B` e `2C` non introducono un nuovo requisito: dividono il punto 2
 locale, sincronizzazione server e companion smartwatch. Questa separazione evita di legare la
 correttezza del timer alla disponibilità di un determinato modello di orologio.
 
-Ordine approvato: **17 e 16 completati → 2A → 4 → 10**. Il prossimo sviluppo è **2A**, dopo
-la consegna separata del 16. Il 16 è testato ma non committato, come richiesto dall'utente.
+Ordine approvato: **17, 16 e 2A completati → 4 → 10**. Il prossimo sviluppo è **4**, dopo
+la consegna separata del 2A. Il 16 è committato; per il 2A si mantiene la pausa prima del commit.
 Il 17 offre una vista dedicata delle proprie evidenze; non dipende dall'implementazione della
 vista generica delle ultime quattro sessioni prevista dal 16. Pausa al commit di ogni requisito.
 L'estensione 7A è già committata in `ca68f78`; i requisiti 8 e 9 restano fuori scope.
@@ -2542,14 +2555,14 @@ dello stallo è inclusa nel 17 e non completa anticipatamente il 16.
 
 #### Release B — Esperienza quotidiana
 
-**Stato: Parziale — 5 requisiti su 8 completati.**
+**Stato: Parziale — 6 requisiti su 8 completati.**
 
 1. Corpo libero puro/zavorrato — completato e validato.
 2. Default auto-riduzione sulle sole nuove selezioni Confirmed — completato e validato.
 3. Orari start/end — completato e validato.
 4. Richiesta del peso corporeo all'avvio configurabile — completata e validata.
-5. Timer locale persistente — non completato.
-6. Ultime quattro sessioni nello specifico scope — completato e validato; non committato.
+5. Timer locale persistente — completato e validato; non committato.
+6. Ultime quattro sessioni nello specifico scope — completato e validato; commit `06d95a7`.
 7. Rail routine — non completato.
 8. Alias e ricerca unica — non completato.
 
@@ -2665,7 +2678,7 @@ scope insieme ai requisiti 8 e 9.
 2. Attivare auto-riduzione soltanto sulle nuove selezioni Confirmed — completato e validato.
 3. Mostrare orari start/end con provenance — completato e validato.
 4. Rendere configurabile la richiesta del peso corporeo — completato e validato.
-5. Mostrare le ultime quattro sessioni scoped nel workout — completato e validato; non committato.
+5. Mostrare le ultime quattro sessioni scoped nel workout — completato e validato; commit `06d95a7`.
 6. Aggiungere rail routine accessibile — non completato.
 7. Centralizzare la ricerca e aggiungere alias — non completato.
 
@@ -2682,12 +2695,12 @@ scope insieme ai requisiti 8 e 9.
 
 ### Fase 3 — timer
 
-**Stato: Non iniziata.** La deadline in memoria è una fondazione preesistente, non soddisfa 2A.
+**Stato: Fondazione locale 2A completata e validata; pronta, senza commit.**
 
-1. Estrarre un motore timer puro con clock iniettato.
-2. Persistenza locale e revisioni.
-3. Sincronizzazione tab e local notification nativa.
-4. Fermarsi alla fondazione locale; server e companion vengono dopo API e pairing.
+1. Motore timer puro con clock iniettato — completato.
+2. Persistenza locale e revisioni — completato, transazioni IndexedDB.
+3. Sincronizzazione tab e adapter local notification — completato; OS fisici restano gate manuali.
+4. Fondazione locale consegnata; server persistente e companion vengono dopo API e pairing.
 
 ### Fase 4 — attrezzatura
 
@@ -2732,7 +2745,7 @@ CasaOS, OAuth reali e dispositivi mobili rimangono gate separati con credenziali
 
 La numerazione seguente conserva le unità logiche definite durante l'analisi e non rappresenta
 l'ordine operativo corrente. Per la sequenza dei prossimi sviluppi fa fede la tabella della
-sezione 7: **17 completato, poi 16, 2A, 4 e 10**.
+sezione 7: **17, 16 e 2A completati, poi 4 e 10**.
 
 1. `test: characterize routine exercise history scopes`
 2. `feat: add stable routine exercise identities`
@@ -2747,7 +2760,7 @@ sezione 7: **17 completato, poi 16, 2A, 4 e 10**.
 11. `feat: detect confirmed stalls and offer a controlled load reset` — requisito 17
 12. `feat: add accessible routine navigation rail`
 13. `feat: add personal exercise aliases and shared search`
-14. `feat: persist deterministic rest timers`
+14. `feat: persist deterministic local workout timers` — requisito 2A, pronto senza commit
 15. `feat: add equipment profiles and immutable loading guidance` — Release C, requisito 7 in un commit unico
 16. `feat: distinguish selectorized and plate-loaded cable equipment` — estensione 7A
 17. `feat: add evidence-informed warm-up loading guide` — Release C.1, requisito 13
@@ -2943,13 +2956,14 @@ manuali (11), corpo libero puro/zavorrato (1), default recupero automatico (5), 
 attrezzatura con snapshot (7), distinzione dei cavi e guida per punto (7A) e richiesta del peso
 corporeo configurabile (14), continuità offline con sincronizzazione sicura (15) e assistente
 allo stallo Confirmed con review e riduzione confermata (17), e storico recente scoped nel
-workout (16), che è pronto nel worktree senza commit.
+workout (16), committato in `06d95a7`, e timer locale persistente/deterministico (2A), pronto
+nel worktree senza commit.
 
 La sequenza approvata dall'utente è:
 
 1. assistente allo stallo (17) completato, con evidenze dedicate e senza decremento automatico;
-2. vista read-only delle ultime quattro sessioni (16) completata e testata; commit non eseguito;
-3. completare 2A, rendendo il timer locale persistente e deterministico;
+2. vista read-only delle ultime quattro sessioni (16) completata e testata, commit `06d95a7`;
+3. timer locale persistente e deterministico (2A) completato e testato, pausa prima del commit;
 4. realizzare rail routine (4) e alias/ricerca centralizzata (10);
 5. avviare il riscaldamento specifico (13) solo dopo l'autorizzazione esplicita;
 6. creare documentazione/contratto API (3), quindi timer multi-device (2B) e companion (2C);
@@ -2957,5 +2971,5 @@ La sequenza approvata dall'utente è:
 
 Questa sequenza mantiene spiegabile ogni prescrizione, conserva i workout passati e impedisce
 che integrazioni o cambi di palestra modifichino retroattivamente ciò che è già stato registrato.
-Il 17 è committato; il 16 è sviluppato e verificato, con pausa prima del commit richiesta
+Il 17 e il 16 sono committati; il 2A è sviluppato e verificato, con pausa prima del commit richiesta
 dall'utente. Ogni requisito mantiene una consegna separata con test e regressione completa.

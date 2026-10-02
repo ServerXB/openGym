@@ -166,6 +166,24 @@ describe('API runtime files declared by Dockerfile', { concurrency: false }, () 
     await unauthorized.text();
   });
 
+  it('accepts absolute notification deadlines in the packaged endpoint and preserves legacy requests', async () => {
+    for (const body of [{ deadlineAt: Date.now() + 30000 }, { seconds: 30 }]) {
+      const response = await request('/api/push/rest-timer', { method: 'POST', body: JSON.stringify(body) });
+      assert.equal(response.status, 200); assert.deepEqual(await response.json(), { ok: true });
+      const cancel = await request('/api/push/rest-timer/cancel', { method: 'POST', body: '{}' });
+      assert.equal(cancel.status, 200); await cancel.text();
+    }
+  });
+
+  it('rejects invalid absolute deadlines and protects the timer endpoint with authentication', async () => {
+    for (const deadlineAt of [Date.now() - 1000, Date.now() + 7200000, 'invalid']) {
+      const response = await request('/api/push/rest-timer', { method: 'POST', body: JSON.stringify({ deadlineAt }) });
+      assert.equal(response.status, 400); await response.text();
+    }
+    const response = await request('/api/push/rest-timer', { method: 'POST', headers: { Cookie: '' }, body: JSON.stringify({ seconds: 30 }) });
+    assert.equal(response.status, 401); await response.text();
+  });
+
   it('synchronizes an offline workout with revisions, idempotency and stale-write protection', async () => {
     const initial = await request('/api/data');
     assert.equal(initial.status, 200);

@@ -2,6 +2,7 @@
 // dictionaries deliberately share the same key set (checked by scripts/check-locales.mjs),
 // so untranslated languages carry an explicit English fallback until native copy is added.
 const KEYS = [
+  'Timer could not be saved. Retry before relying on the countdown.',
   'Recent history',
   'Last four sessions',
   'Recent sessions — {0}',

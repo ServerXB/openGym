@@ -23,6 +23,7 @@ import { LOAD_MODE, workoutEntryLoadMode } from '../lib/exercise-load-mode.js'
 import { applySetCountFromNextWorkout, entrySetStatus, futureSetCountPresentation, invalidateEntryReview, isOptionalSet, prescribedSetCount, unitPrescribedComplete, workoutSetStatus } from '../lib/workout-set-status.js'
 import { appendScopedWorkoutEntry } from '../lib/workout-scope.js'
 import { equipmentGuideForEntry } from '../lib/equipment-load.js'
+import { bindTimedSet } from '../lib/timed-set-completion.js'
 
 /* ---------- start chooser (no active workout) ---------- */
 function StartChooser() {
@@ -199,6 +200,13 @@ function ActiveWorkout() {
   const update = useStore(s => s.update)
   const { startRest, stopRest } = useUI()
   const A = S.active
+  const timerCompletion = useUI(s => s.timerCompletion)
+  useEffect(() => {
+    if (timerCompletion?.workoutId === A.id && timerCompletion.workoutDone) {
+      useUI.getState().clearTimerCompletion()
+      workoutCompleteSheet()
+    }
+  }, [timerCompletion, A.id])
   const units = supersetUnits(A.entries)
   const cur = Math.min(A.cur, Math.max(0, A.entries.length - 1))
   const unit = A.entries.length ? unitOf(units, cur) : []
@@ -252,10 +260,9 @@ function ActiveWorkout() {
   // behave exactly as they do for a reps set.
   const startTimed = (idx, i) => {
     const e = A.entries[idx]
-    useUI.getState().startWork(e.sets[i].sec || 45, exOr(e.id).n, elapsed => {
-      mutEntry(idx, en => { en.sets[i].sec = elapsed })
-      if (!useStore.getState().S.active.entries[idx].sets[i].done) toggle(idx, i)
-    })
+    let binding
+    const saved = update(s => { binding = bindTimedSet(s, idx, i, uid) }, false)
+    if (saved !== false && binding) useUI.getState().startWork(e.sets[i].sec || 45, exOr(e.id).n, null, binding)
   }
 
   const toggle = (idx, i) => {

@@ -38,7 +38,8 @@ export function completedWorkoutEntry(entry) {
     // A workout started by an older build stays unscoped and therefore readable as legacy
     // baseline. Modern entries retain their exact immutable slot/group snapshot.
     ...progressionScopeSnapshot(entry, { legacyFallback: false }),
-    sets: entry.sets,
+    // Runtime timer binding is local to this active workout, not a historical set field.
+    sets: entry.sets?.map(({ localTimerSetId, ...set }) => set),
     topW: entry.topW || null,
     target: entry.target || null,
     ...(entry.review ? { review: { ...entry.review } } : {}),

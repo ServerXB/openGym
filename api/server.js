@@ -10,6 +10,7 @@ import {
 } from '@simplewebauthn/server';
 import webpush from 'web-push';
 import { createStateStore, StateStoreError, SYNC_PROTOCOL } from './state-store.js';
+import { secondsUntilRestDeadline } from './rest-timer.js';
 
 const PORT = +(process.env.PORT || 3000);
 const DATA = process.env.DATA_DIR || '/data';
@@ -435,8 +436,8 @@ const routes = {
     const user = readSession(req);
     if (!user) return json(res, 401, { error: 'not signed in' });
     const body = await readBody(req);
-    const sec = Math.max(1, Math.min(3600, Math.round(+body.seconds || 0)));
-    if (!sec) return json(res, 400, { error: 'seconds required' });
+    const sec = secondsUntilRestDeadline(body);
+    if (sec === null) return json(res, 400, { error: 'valid seconds or future deadlineAt required' });
     scheduleRestTimer(user.id, sec);
     json(res, 200, { ok: true });
   },

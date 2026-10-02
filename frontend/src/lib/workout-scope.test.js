@@ -3,6 +3,14 @@ import { normalizeProgressionScopes } from './progression-scope.js'
 import { appendScopedWorkoutEntry, buildScopedWorkoutEntry, completedWorkoutEntries } from './workout-scope.js'
 
 describe('workout progression scope lifecycle', () => {
+  it('removes local timer row IDs from completed snapshots without changing active rows', () => {
+    const entries = [{ id: 'plank', localTimerEntryId: 'entry-runtime', target: { mode: 'time' },
+      sets: [{ sec: 45, done: true, localTimerSetId: 'set-runtime' }] }]
+    const finished = completedWorkoutEntries(entries)
+    expect(finished[0].sets).toEqual([{ sec: 45, done: true }])
+    expect(finished[0]).not.toHaveProperty('localTimerEntryId')
+    expect(entries[0].sets[0].localTimerSetId).toBe('set-runtime')
+  })
   it('snapshots both ids at start and keeps them unchanged through refresh and finish', () => {
     const state = {
       unit: 'kg', restSec: 90, exWeights: {}, progressionWeights: {}, workouts: [],

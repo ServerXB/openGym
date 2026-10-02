@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { HashRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { useStore } from './store/useStore.js'
-import { useUI } from './store/useUI.js'
+import { useUI, initializeTimers } from './store/useUI.js'
 import { bindUI } from './components/ui.jsx'
 import { ACCENTS } from './lib/format.js'
 import { setLang, useLang } from './lib/i18n.js'
@@ -38,6 +38,7 @@ function applyPrefs(theme, accent) {
 }
 
 function Shell() {
+  useEffect(() => initializeTimers(), [])
   const navigate = useNavigate()
   const loc = useLocation()
   const { S, user, ready } = useStore()

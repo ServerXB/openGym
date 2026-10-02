@@ -3,26 +3,70 @@ import { uid } from '../lib/format.js'
 import { beep, vibrate } from '../lib/sound.js'
 import { api } from '../lib/api.js'
 import { t } from '../lib/i18n.js'
+import { MOBILE } from '../lib/mobile.js'
 import { useStore } from './useStore.js'
+import { createTimerStorage, TIMER_SIGNAL_KEY } from '../lib/local-timer-storage.js'
+import { createTimerRuntime } from '../lib/local-timer-runtime.js'
+import { timerToken } from '../lib/local-timer.js'
+import { applyTimedSetCompletion } from '../lib/timed-set-completion.js'
+import { createTimerNotifier } from '../lib/timer-notifications.js'
 
-// Fire-and-forget: lets the server push a "rest over" alert if this tab gets suspended
-// before the local timer completes. No-ops for guests / offline.
-const pushRestTimer = sec => { if (useStore.getState().user) api('/api/push/rest-timer', { method: 'POST', body: JSON.stringify({ seconds: sec }) }).catch(() => {}) }
-const cancelPushRestTimer = () => { if (useStore.getState().user) api('/api/push/rest-timer/cancel', { method: 'POST', body: '{}' }).catch(() => {}) }
-
-let toastTm = null
-let timerInt = null
-let timerTick = null
-let workInt = null
-let workTick = null
-let workDone = null
+let toastTm, channel
+const legacyCallbacks = new Map()
+const scope = () => {
+  const state = useStore.getState()
+  return state.ready && state.S.active?.id
+    ? { accountId: state.getAccountId(), workoutId: state.S.active.id } : null
+}
+const signal = accountId => {
+  channel?.postMessage({ accountId })
+  try { localStorage.setItem(TIMER_SIGNAL_KEY, JSON.stringify({ accountId, nonce: uid() })) } catch { /* BroadcastChannel still works */ }
+}
+const notify = createTimerNotifier({ mobile: MOBILE, user: () => useStore.getState().user, api })
+const ring = () => {
+  const snd = useStore.getState().S.sound
+  beep(snd, 880, 0.15); beep(snd, 880, 0.15, 0.25); beep(snd, 1320, 0.4, 0.5)
+  vibrate([200, 100, 200])
+}
+const runtime = createTimerRuntime({
+  storage: createTimerStorage({ signal }),
+  clock: { wallNow: () => Date.now(), monoNow: () => performance.now() },
+  getScope: scope, id: uid,
+  onChange: value => {
+    const ui = useUI.getState(), previous = ui.work || ui.timer
+    if (value && previous?.timerId === value.timerId && previous.revision === value.revision && previous.left === value.left) return
+    if (value && previous?.timerId === value.timerId && value.left < previous.left && value.left > 0 && value.left <= 3) beep(useStore.getState().S.sound, 660, 0.1)
+    useUI.setState({ timer: value?.kind === 'rest' ? value : null, work: value?.kind === 'work' ? value : null })
+  },
+  onError: () => useUI.setState({ timerError: true }),
+  onMutation: record => {
+    if (record.status === 'running') legacyCallbacks.clear()
+    else if (record.status === 'cancelled') legacyCallbacks.delete(record.timerId)
+    useUI.setState({ timerError: false }); notify(record)
+  },
+  onComplete: (record, elapsed) => {
+    if (record.kind === 'rest') { ring(); useUI.getState().toast(t('Rest over — next set!')); return true }
+    // Keep the pre-existing callback API for live callers. Real workout rows always use the
+    // durable binding below; an ephemeral callback is never guessed/replayed after reload.
+    const callback = legacyCallbacks.get(record.timerId)
+    if (callback) { legacyCallbacks.delete(record.timerId); ring(); callback(elapsed); return true }
+    let result
+    const saved = useStore.getState().updateActiveWorkout(record.workoutId,
+      state => { result = applyTimedSetCompletion(state, record, elapsed) })
+    if (saved === false) { useUI.setState({ timerError: true }); return false }
+    useUI.setState({ timerError: false })
+    if (!result) return true // removed/already checked set or replaced workout: never credit a different row
+    ring()
+    useUI.setState({ timerCompletion: { ...result, workoutId: record.workoutId, timerId: record.timerId } })
+    useUI.getState().toast(t('Hold logged'))
+    if (result.restSeconds > 0) useUI.getState().startRest(result.restSeconds)
+    return true
+  }
+})
+const expectedToken = (value, current) => value?.timerId ? value : timerToken(current)
 
 export const useUI = create((set, get) => ({
-  sheets: [],          // { id, render:(close)=>JSX, kind:'sheet'|'center', locked }
-  toastMsg: '',
-  timer: null,         // rest countdown between sets — { left, total, endsAt }
-  work: null,          // work countdown DURING a timed set (issue #16) — { left, total, endsAt, label }
-
+  sheets: [], toastMsg: '', timer: null, work: null, timerError: false, timerCompletion: null,
   openSheet(render, { kind = 'sheet', locked = false } = {}) {
     const id = uid()
     set(s => ({ sheets: [...s.sheets, { id, render, kind, locked }] }))
@@ -31,101 +75,82 @@ export const useUI = create((set, get) => ({
   },
   closeSheet(id) { set(s => ({ sheets: s.sheets.filter(x => x.id !== id) })) },
   closeAll() { set({ sheets: [] }) },
-
   toast(msg) {
-    set({ toastMsg: msg })
-    clearTimeout(toastTm)
+    set({ toastMsg: msg }); clearTimeout(toastTm)
     toastTm = setTimeout(() => set({ toastMsg: '' }), 2200)
   },
-
+  clearTimerCompletion() { set({ timerCompletion: null }) },
   startRest(sec) {
-    get().stopRest()
-    const endsAt = Date.now() + sec * 1000
-    set({ timer: { left: sec, total: sec, endsAt } })
-    pushRestTimer(sec)
-    timerTick = () => {
-      const tm = get().timer
-      if (!tm) return
-      const left = Math.max(0, Math.round((tm.endsAt - Date.now()) / 1000))
-      if (left === tm.left) return
-      const snd = useStore.getState().S.sound
-      if (left <= 0) {
-        beep(snd, 880, 0.15); beep(snd, 880, 0.15, 0.25); beep(snd, 1320, 0.4, 0.5)
-        vibrate([200, 100, 200]); get().toast(t('Rest over — next set!')); get().stopRest(); return
-      }
-      if (left <= 3) beep(snd, 660, 0.1)
-      set({ timer: { ...tm, left } })
-    }
-    timerInt = setInterval(timerTick, 1000)
-    document.addEventListener('visibilitychange', timerTick)
+    if (!Number.isFinite(sec) || sec <= 0) return get().stopRest()
+    if (sec > 86400) { set({ timerError: true }); return Promise.resolve(false) }
+    return runtime.command('start', { kind: 'rest', durationMs: sec * 1000 })
   },
-  addRest(sec) {
+  addRest(sec, expected) {
     const tm = get().timer
-    if (!tm) return
-    const left = tm.left + sec
-    // taking off more than is left means "I'm ready now" — same as skipping, and it keeps a
-    // negative duration out of both the progress bar and the server-side push schedule
-    if (left <= 0) { get().stopRest(); return }
-    set({ timer: { ...tm, left, total: tm.total + sec, endsAt: tm.endsAt + sec * 1000 } })
-    pushRestTimer(left)
+    if (!tm || !Number.isFinite(sec) || tm.total + sec > 86400) return Promise.resolve(false)
+    return runtime.command('extend', { deltaMs: sec * 1000 }, expectedToken(expected, tm))
   },
-  stopRest() {
-    if (timerInt) clearInterval(timerInt); timerInt = null
-    if (timerTick) document.removeEventListener('visibilitychange', timerTick); timerTick = null
-    if (get().timer) cancelPushRestTimer()
-    set({ timer: null })
+  stopRest(expected) {
+    const tm = get().timer
+    return tm ? runtime.command('cancel', {}, expectedToken(expected, tm)) : Promise.resolve(false)
   },
-
-  /* ---- work timer (issue #16) ----
-     Times the set itself, not the recovery after it. Kept separate from the rest timer on
-     purpose: the two mean opposite things, they must never run together, and a work set is
-     something you are watching — so it gets no server push (that endpoint says "rest over",
-     and a plank does not need a notification you are staring at anyway).
-     `onDone(elapsedSec)` is called both when the countdown reaches zero and on an early
-     finish; the elapsed time is what actually gets logged, so stopping at 0:38 of a 0:45
-     hold records 0:38 rather than crediting the full target. */
-  startWork(sec, label, onDone) {
-    get().stopWork()
-    get().stopRest()
+  async startWork(sec, label, onDone, binding = null) {
     const total = Math.max(1, Math.round(sec) || 1)
-    const endsAt = Date.now() + total * 1000
-    workDone = onDone
-    set({ work: { left: total, total, endsAt, label } })
-    workTick = () => {
-      const wk = get().work
-      if (!wk) return
-      const left = Math.max(0, Math.round((wk.endsAt - Date.now()) / 1000))
-      if (left === wk.left) return
-      const snd = useStore.getState().S.sound
-      if (left <= 0) {
-        beep(snd, 880, 0.15); beep(snd, 880, 0.15, 0.25); beep(snd, 1320, 0.4, 0.5)
-        vibrate([200, 100, 200])
-        const done = workDone
-        get().stopWork()
-        if (done) done(wk.total)
-        return
-      }
-      if (left <= 3) beep(snd, 660, 0.1)
-      set({ work: { ...wk, left } })
-    }
-    workInt = setInterval(workTick, 1000)
-    document.addEventListener('visibilitychange', workTick)
+    if (binding && scope()?.workoutId !== binding.workoutId) return false
+    if (!binding && typeof onDone !== 'function') return false
+    const started = await runtime.command('start', { kind: 'work', durationMs: total * 1000, label,
+      binding: binding ? { entryId: binding.entryId, setId: binding.setId }
+        : { entryId: 'callback:' + uid(), setId: 'callback:' + uid() } })
+    if (started && typeof onDone === 'function') legacyCallbacks.set(runtime.token().timerId, onDone)
+    return started
   },
-  // Ended the hold early — log what was actually held.
-  finishWorkEarly() {
+  finishWorkEarly(expected) {
     const wk = get().work
-    if (!wk) return
-    const elapsed = Math.max(1, wk.total - wk.left)
-    const done = workDone
-    vibrate(30)
-    get().stopWork()
-    if (done) done(elapsed)
+    return wk ? runtime.command('finish', {}, expectedToken(expected, wk)) : Promise.resolve(false)
   },
-  // Abandon without logging anything.
-  stopWork() {
-    if (workInt) clearInterval(workInt); workInt = null
-    if (workTick) document.removeEventListener('visibilitychange', workTick); workTick = null
-    workDone = null
-    set({ work: null })
+  stopWork(expected) {
+    const wk = get().work
+    return wk ? runtime.command('cancel', {}, expectedToken(expected, wk)) : Promise.resolve(false)
   }
 }))
+
+// One mounted Shell owns the interval/listeners. StrictMode cleanup never cancels a persisted timer.
+export function initializeTimers() {
+  let previousScope = scope()
+  const refresh = () => runtime.restore()
+  const unsubscribe = useStore.subscribe(() => {
+    const next = scope()
+    if (JSON.stringify(next) !== JSON.stringify(previousScope)) {
+      const departed = previousScope, token = runtime.token()
+      previousScope = next
+      runtime.clearView()
+      legacyCallbacks.clear()
+      useUI.setState({ timerCompletion: null, timerError: false })
+      if (departed) runtime.cancelScope(departed, token)
+      refresh()
+    } else {
+      const work = useUI.getState().work
+      if (work?.binding && !work.binding.entryId.startsWith('callback:')) {
+        const entry = useStore.getState().S.active?.entries?.find(e => e.localTimerEntryId === work.binding.entryId)
+        const row = entry?.sets?.find(s => s.localTimerSetId === work.binding.setId)
+        if (!row || row.done) useUI.getState().stopWork(timerToken(work))
+      }
+    }
+  })
+  const storage = event => { if (event.key === TIMER_SIGNAL_KEY) refresh() }
+  if (typeof BroadcastChannel !== 'undefined') {
+    channel = new BroadcastChannel('opengym-local-timers-v1')
+    channel.addEventListener('message', refresh)
+  }
+  window.addEventListener('storage', storage)
+  window.addEventListener('focus', refresh)
+  document.addEventListener('visibilitychange', refresh)
+  const interval = setInterval(() => runtime.tick(), 250)
+  refresh()
+  return () => {
+    clearInterval(interval); unsubscribe()
+    window.removeEventListener('storage', storage); window.removeEventListener('focus', refresh)
+    document.removeEventListener('visibilitychange', refresh)
+    channel?.close(); channel = null
+  }
+}

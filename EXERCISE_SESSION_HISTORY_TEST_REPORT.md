@@ -4,6 +4,10 @@ Verifica: **2026-10-02**. Base codice: `198e827`.
 Implementazione e test nel worktree; **nessun commit, push o deploy eseguito** per il requisito 16.
 Nome proposto del commit: `feat: show four scoped exercise sessions during workouts`.
 
+Aggiornamento all'avvio del requisito 2A (2026-10-02): il commit **`06d95a7`** con questo nome
+è ora presente nel repository. La dicitura precedente registra la consegna originale senza
+commit; questo report conserva i risultati ottenuti allora.
+
 ## Comportamento consegnato
 
 Nell'esercizio attivo il pulsante **Storico recente** conserva l'anteprima dell'ultima sessione.

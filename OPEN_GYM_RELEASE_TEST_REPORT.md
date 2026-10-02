@@ -9,11 +9,11 @@ in `OPEN_GYM_PRODUCT_BACKLOG_ANALYSIS.md`.
 
 ## 2. Ambiente di riferimento
 
-- Data ultimo aggiornamento: 2026-09-28
+- Data ultimo aggiornamento: 2026-10-02
 - Repository: `https://github.com/ServerXB/openGym.git`
 - Branch: `feature/confirmed-rep-range-progression`
 - Base prima degli sviluppi applicativi del backlog: `f0f605b`
-- Revisione verificata: `6279f0a`, più hardening finale non ancora committato
+- Revisione corrente verificata: `06d95a7`, più requisito 2A pronto e non committato; le sezioni storiche riportano le rispettive basi
 - Sistema usato per i test: Windows PowerShell
 - Frontend: React 19, Vite 8, Vitest 4
 - Stato baseline frontend: 18 file di test, 344 test superati
@@ -2734,3 +2734,29 @@ Matrice completa, limitazioni e comandi di replica:
 **Nessun commit/push/deploy eseguito per il 16**, per istruzione esplicita dell'utente.
 Nome proposto del commit: `feat: show four scoped exercise sessions during workouts`.
 Il requisito 2A resta il successivo e non è incluso in questa consegna.
+
+Aggiornamento: il requisito 16 è ora committato in `06d95a7`, rilevato all'avvio del 2A.
+
+## 20. Requisito 2A — Timer locale persistente e deterministico
+
+Verifica finale: **2026-10-02**. Base: `06d95a7`. Timer di recupero e lavoro persistiti in
+IndexedDB, clock monotono nella pagina attiva, deadline per ripresa, revisioni/tombstone,
+transazioni e segnali fra schede. Serie a tempo legate al workout e alle righe stabili; replay
+idempotente, salvataggio pendente recuperabile ed edit dell'altra scheda conservati.
+Snapshot finiti e progressione invariati. Notifiche native best-effort e push legacy alla stessa
+deadline; incluso helper nel packaging Docker. Non sono sviluppati 2B e 2C.
+
+Gate: **1.126/1.126 frontend** (58 file, 174 test aggiunti), **32/32 backend**, build PASS
+(138 moduli, warning preesistente sui chunk), 11 lingue/989 chiavi e 2.000 confronti solver PASS.
+Browser: **25 controlli 2A**, **30 storico**, **28 stallo**, **6 recovery-first**, **29 attrezzatura**,
+tutti PASS. Incluse due schede, pulsanti reali, refresh, chiusura completa e riapertura Edge,
+clock avanti/indietro, avviso locale una sola volta, serie rimossa/ricreata e record corrotto.
+Nessuna regressione rilevata nei controlli eseguiti. OS fisici e vero stack CasaOS/Docker restano
+gate manuali; la `Map` push del server non diventa persistente in questo rilascio.
+
+Matrice, casi limite, limiti del wall clock/OS, comandi e profilo temporaneo per replicare:
+[LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md](LOCAL_TIMER_PERSISTENCE_TEST_REPORT.md).
+
+**Nessun commit/push/deploy eseguito per il 2A**. Nome proposto:
+`feat: persist deterministic local workout timers`.
+Pausa prima del commit; il prossimo requisito in ordine è **4 — navigazione delle routine**.

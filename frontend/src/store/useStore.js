@@ -741,12 +741,28 @@ export const useStore = create((set, get) => {
     user: cachedUser,
     sync: cachedUser ? syncView() : null,
     ready: false,
+    // Account activation publishes state before user; timer ownership must use the actual
+    // local replica owner, not an occasionally stale user prop during sign-in/sign-out.
+    getAccountId: () => currentAccountId,
 
     // Mutate a draft of S via producer fn, then persist + schedule sync.
     update(mut, push = true) {
       const state = clone(get().S)
       mut(state)
       return persist(state, push)
+    },
+    // A suspended tab can hold an older copy of the workout. Timer completion must apply
+    // its narrow set mutation to the authoritative local active snapshot, not replace edits
+    // made by another tab while it slept. Completed workouts/configuration are untouched.
+    updateActiveWorkout(workoutId, mut) {
+      const stored = readStoredEnvelope(currentAccountId)
+      if (stored.error || (stored.envelope && stored.envelope.accountId !== currentAccountId)) return false
+      const active = stored.envelope ? stored.envelope.state.active : get().S.active
+      if (active?.id !== workoutId) return true // obsolete timer: acknowledge without changing anything
+      const state = clone(get().S)
+      state.active = clone(active)
+      mut(state)
+      return persist(state, false)
     },
     replaceState(state, push = false) { return persist(clone(state), push) },
 

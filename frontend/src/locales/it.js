@@ -5,6 +5,7 @@ import equipmentFallback from '../lib/equipmentLocaleFallback.js'
 export default {
   ...confirmedRepRangeFallback,
   ...equipmentFallback,
+  'Timer could not be saved. Retry before relying on the countdown.': 'Impossibile salvare il timer. Riprova prima di affidarti al countdown.',
   'Recent history': 'Storico recente',
   'Last four sessions': 'Ultime quattro sessioni',
   'Recent sessions — {0}': 'Ultime sessioni — {0}',
